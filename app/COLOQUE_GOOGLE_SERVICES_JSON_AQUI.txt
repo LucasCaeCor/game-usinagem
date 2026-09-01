@@ -1,0 +1,9 @@
+Para ativar o multiplayer assíncrono:
+1. No Firebase Console, registre um app Android com package: br.com.usinagemmaster
+2. Baixe google-services.json
+3. Copie esse arquivo para ESTA pasta: app/google-services.json
+4. Ative Authentication > Sign-in method > Anonymous
+5. Crie um banco Cloud Firestore
+6. Publique as regras do arquivo firebase/firestore.rules
+
+Sem google-services.json o projeto continua compilando e funcionando normalmente em modo offline.
