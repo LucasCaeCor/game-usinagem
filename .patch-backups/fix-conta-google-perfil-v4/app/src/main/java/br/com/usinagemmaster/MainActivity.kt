@@ -1,7 +1,5 @@
 package br.com.usinagemmaster
 
-import br.com.usinagemmaster.feature.account.AccountRootOverlay
-
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,13 +34,9 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            AccountRootOverlay { // FIX_V4_ACCOUNT_ROOT
-
             UsinagemMasterTheme {
                 AppNavigation()
             }
-        
-            } // FIX_V4_ACCOUNT_ROOT_END
         }
     }
 }

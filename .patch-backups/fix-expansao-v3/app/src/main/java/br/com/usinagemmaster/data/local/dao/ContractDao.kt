@@ -7,12 +7,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ContractDao {
-    @Query("SELECT * FROM contracts WHERE status != 'COMPLETED' ORDER BY generatedAt DESC") fun observeAll(): Flow<List<ContractEntity>>
+    @Query("SELECT * FROM contracts ORDER BY generatedAt DESC") fun observeAll(): Flow<List<ContractEntity>>
     @Query("SELECT * FROM contracts WHERE status = 'ACTIVE' ORDER BY startedAt ASC") suspend fun getActive(): List<ContractEntity>
     @Query("SELECT * FROM contracts WHERE status = 'COMPLETED' ORDER BY generatedAt DESC") suspend fun getCompleted(): List<ContractEntity>
-
-    @Query("SELECT * FROM contracts WHERE status = 'COMPLETED' ORDER BY generatedAt DESC")
-    fun observeCompleted(): Flow<List<ContractEntity>>
     @Query("SELECT COUNT(*) FROM contracts WHERE status = 'ACTIVE'") fun observeActiveCount(): Flow<Int>
     @Query("SELECT COUNT(*) FROM contracts WHERE status = 'AVAILABLE'") suspend fun availableCount(): Int
     @Query("SELECT * FROM contracts WHERE id = :id") suspend fun byId(id: String): ContractEntity?
@@ -124,9 +121,4 @@ interface ContractDao {
         creditCompany(contract.rewardCents, contract.reputationReward)
         return true
     }
-
-    /** Remove somente o registro do contrato já pago/concluído. Não toca no financeiro. */
-    @Query("DELETE FROM contracts WHERE id = :contractId AND status = 'COMPLETED'")
-    suspend fun dismissCompleted(contractId: String)
-
 }

@@ -2,7 +2,6 @@ package br.com.usinagemmaster.feature.expansion
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import br.com.usinagemmaster.data.local.dao.ContractDao
 import br.com.usinagemmaster.data.local.entity.ContractEntity
 import br.com.usinagemmaster.data.preferences.ExpansionRepository
 import br.com.usinagemmaster.data.social.CharacterOffer
@@ -21,7 +20,6 @@ data class ExpansionUiState(
     val companyLevel: Int = 1,
     val cashCents: Long = 0L,
     val activeContracts: List<ContractEntity> = emptyList(),
-    val completedContracts: List<ContractEntity> = emptyList(),
     val offers: List<CharacterOffer> = emptyList(),
     val accountName: String? = null,
     val accountEmail: String? = null,
@@ -35,7 +33,6 @@ class ExpansionViewModel @Inject constructor(
     private val expansionRepository: ExpansionRepository,
     private val gameRepository: GameRepository,
     private val rentalService: CharacterRentalService,
-    private val contractDao: ContractDao,
 ) : ViewModel() {
     private val extras = MutableStateFlow(ExpansionUiState())
 
@@ -43,15 +40,13 @@ class ExpansionViewModel @Inject constructor(
         expansionRepository.state,
         gameRepository.dashboard(),
         gameRepository.contracts(),
-        contractDao.observeCompleted(),
         extras,
-    ) { expansion, dashboard, contracts, completed, extra ->
+    ) { expansion, dashboard, contracts, extra ->
         extra.copy(
             expansion = expansion,
             companyLevel = dashboard.companyLevel,
             cashCents = dashboard.cashCents,
             activeContracts = contracts.filter { it.status == ContractStatus.ACTIVE.name },
-            completedContracts = completed,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExpansionUiState())
 
@@ -64,8 +59,6 @@ class ExpansionViewModel @Inject constructor(
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         extras.update { it.copy(accountName = user?.displayName, accountEmail = user?.email, message = message) }
     }
-
-    fun showMessage(message: String) = extras.update { it.copy(message = message) }
 
     fun chooseSpecialty(code: String) = action { expansionRepository.chooseSpecialty(code, uiState.value.companyLevel) }
     fun unlockCompanySkill(id: String) = action { expansionRepository.unlockCompanySkill(id, uiState.value.companyLevel) }
@@ -80,31 +73,9 @@ class ExpansionViewModel @Inject constructor(
         extras.update { it.copy(message = "Ficha diária coletada. Total: $total") }
     }
 
-    /** Sorteia/aplica o prêmio sem revelar antes da animação terminar. */
-    suspend fun drawWheelReward(): GachaReward {
-        check(!extras.value.busy) { "Aguarde a operação atual" }
-        extras.update { it.copy(busy = true, message = null, lastReward = null) }
-        return try {
-            expansionRepository.rollGacha(uiState.value.companyLevel)
-        } finally {
-            extras.update { it.copy(busy = false) }
-        }
-    }
-
-    /** Revela exatamente o prêmio que já determinou o setor vencedor da roda. */
-    fun revealWheelReward(reward: GachaReward) {
-        extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
-    }
-
-    // Mantido para compatibilidade com qualquer chamada antiga.
     fun roll() = action {
         val reward = expansionRepository.rollGacha(uiState.value.companyLevel)
         extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
-    }
-
-    fun dismissCompletedContract(id: String) = action {
-        contractDao.dismissCompleted(id)
-        extras.update { it.copy(message = "Contrato dispensado do histórico. O lançamento financeiro foi mantido.") }
     }
 
     fun publishCharacter() = action {
