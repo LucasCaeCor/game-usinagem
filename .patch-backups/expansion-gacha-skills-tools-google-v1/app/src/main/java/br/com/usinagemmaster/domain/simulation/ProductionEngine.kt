@@ -1,7 +1,5 @@
 package br.com.usinagemmaster.domain.simulation
 
-import br.com.usinagemmaster.domain.expansion.ProductionModifiers
-
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
 import br.com.usinagemmaster.domain.model.EmployeeRuntime
 import br.com.usinagemmaster.domain.model.MachineProduction
@@ -16,8 +14,7 @@ object ProductionEngine {
     fun calculate(
         machines: List<MachineRuntime>,
         employees: List<EmployeeRuntime>,
-        idleEmployeeIds: Set<String> = emptySet(),
-        modifiers: ProductionModifiers = ProductionModifiers(),
+        idleEmployeeIds: Set<String> = emptySet()
     ): ProductionSnapshot {
         val employeesByMachine = employees
             .filter { it.assignedMachineId != null }
@@ -71,11 +68,10 @@ object ProductionEngine {
                 else -> 1.0
             }
             val legendaryBonus = legendaryMachineMultiplier(employee.legendaryCode, machine.machineType)
-        val expansionMachineMultiplier = modifiers.multiplierForMachine(machine.machineType)
 
             val units = definition.baseProductionPerHour *
                 condition * levelBonus * skillBonus * moraleBonus * specialtyBonus * traitBonus *
-                legendaryBonus * supportProductivityMultiplier * expansionMachineMultiplier * modifiers.globalSpeedMultiplier
+                legendaryBonus * supportProductivityMultiplier
 
             val qualityTrait = when (employee.trait) {
                 "Perfeccionista", "Cuidadoso" -> 6
@@ -90,16 +86,15 @@ object ProductionEngine {
                 definition.quality * condition +
                     employee.skillLevel * 1.5 +
                     qualityTrait +
-                    supportQualityBonus +
-            modifiers.qualityBonus
-        ).roundToInt().coerceIn(1, 100)
+                    supportQualityBonus
+                ).roundToInt().coerceIn(1, 100)
 
             MachineProduction(
                 machineId = machine.id,
                 employeeId = employee.id,
                 unitsPerHour = units,
                 quality = quality,
-                powerKw = definition.powerKw * modifiers.energyMultiplier,
+                powerKw = definition.powerKw,
                 isOperating = true
             )
         }

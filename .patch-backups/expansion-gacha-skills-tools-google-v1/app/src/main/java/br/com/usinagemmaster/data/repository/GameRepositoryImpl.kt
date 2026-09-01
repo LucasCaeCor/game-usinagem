@@ -1,9 +1,5 @@
 package br.com.usinagemmaster.data.repository
 
-import br.com.usinagemmaster.domain.expansion.ExpansionState
-
-import br.com.usinagemmaster.data.preferences.ExpansionRepository
-
 import br.com.usinagemmaster.data.local.dao.*
 import br.com.usinagemmaster.data.local.entity.*
 import br.com.usinagemmaster.data.preferences.GamePreferences
@@ -40,8 +36,7 @@ class GameRepositoryImpl @Inject constructor(
     private val facilityDao: FacilityDao,
     private val goalDao: GoalDao,
     private val legendaryMissionDao: LegendaryMissionDao,
-    private val gamePreferences: GamePreferences,
-    private val expansionRepository: ExpansionRepository
+    private val gamePreferences: GamePreferences
 ) : GameRepository {
 
     private val simulationMutex = Mutex()
@@ -64,8 +59,8 @@ class GameRepositoryImpl @Inject constructor(
     }
 
     override fun production(): Flow<ProductionSnapshot> = combine(
-        machineDao.observeAll(), employeeDao.observeAll(), gamePreferences.workforce, expansionRepository.state
-    ) { machines, employees, workforce, expansion -> calculateProduction(machines, employees, workforce, expansion) }
+        machineDao.observeAll(), employeeDao.observeAll(), gamePreferences.workforce
+    ) { machines, employees, workforce -> calculateProduction(machines, employees, workforce) }
 
     override fun machines() = machineDao.observeAll()
     override fun employees() = employeeDao.observeAll()
@@ -141,7 +136,7 @@ class GameRepositoryImpl @Inject constructor(
     override suspend fun accelerateProduction10Minutes(): Result<Long> = runCatching {
         simulationMutex.withLock {
             val company = companyDao.get() ?: error("Empresa não inicializada")
-            val snapshot = calculateProduction(machineDao.getAll(), employeeDao.getAll(), gamePreferences.workforce.first(), expansionRepository.snapshot())
+            val snapshot = calculateProduction(machineDao.getAll(), employeeDao.getAll(), gamePreferences.workforce.first())
             require(snapshot.operatingMachines > 0) { "Nenhuma máquina está produzindo agora" }
 
             val result = simulateProduction(
@@ -206,8 +201,7 @@ class GameRepositoryImpl @Inject constructor(
         val machines = machineDao.getAll()
         val employees = employeeDao.getAll()
         val workforce = gamePreferences.workforce.first()
-        val expansion = expansionRepository.snapshot()
-        val snapshot = calculateProduction(machines, employees, workforce, expansion)
+        val snapshot = calculateProduction(machines, employees, workforce)
         val elapsedHours = elapsedMillis / 3_600_000.0
         val elapsedMinutes = elapsedMillis / 60_000L
 
@@ -225,18 +219,15 @@ class GameRepositoryImpl @Inject constructor(
                 val targetMilli = contract.quantity * 1000L
                 val currentMilli = contract.productionProgressMilli.coerceAtMost(targetMilli)
                 val needed = (targetMilli - currentMilli).coerceAtLeast(0)
-                val toolEffect = expansion.toolEffectForContract(contract.id)
-            val effectiveQuality = (snapshot.averageQuality + toolEffect.qualityBonus).coerceIn(0, 100)
-            val qualityGap = contract.requiredQuality - effectiveQuality
+                val qualityGap = contract.requiredQuality - snapshot.averageQuality
                 val qualityFactor = when {
                     qualityGap <= 0 -> 1.0
                     qualityGap <= 10 -> 0.70
                     else -> 0.30
                 }
-                val acceptedAvailable = (productionMilli * qualityFactor * toolEffect.speedMultiplier).toLong()
+                val acceptedAvailable = (productionMilli * qualityFactor).toLong()
                 val applied = min(acceptedAvailable, needed)
-                val effectiveFactor = qualityFactor * toolEffect.speedMultiplier
-            val rawConsumed = if (effectiveFactor <= 0.0) productionMilli else kotlin.math.ceil(applied / effectiveFactor).toLong()
+                val rawConsumed = if (qualityFactor <= 0.0) productionMilli else kotlin.math.ceil(applied / qualityFactor).toLong()
                 val newProgress = currentMilli + applied
                 productionMilli = (productionMilli - rawConsumed).coerceAtLeast(0)
 
@@ -347,8 +338,7 @@ class GameRepositoryImpl @Inject constructor(
     private fun calculateProduction(
         machines: List<MachineEntity>,
         employees: List<EmployeeEntity>,
-        workforce: WorkforceState = WorkforceState(),
-        expansion: ExpansionState = ExpansionState()
+        workforce: WorkforceState = WorkforceState()
     ): ProductionSnapshot {
         val now = System.currentTimeMillis()
         val idleIds = if (workforce.snackImmunityActive(now)) {
@@ -363,9 +353,8 @@ class GameRepositoryImpl @Inject constructor(
             employees = employees.map {
                 EmployeeRuntime(it.id, it.specialty, it.skillLevel, it.morale, it.trait, it.assignedMachineId, it.legendaryCode)
             },
-            idleEmployeeIds = idleIds,
-        modifiers = expansion.productionModifiers()
-    )
+            idleEmployeeIds = idleIds
+        )
     }
 
     private suspend fun seedStarterMachine(now: Long) {
@@ -590,9 +579,6 @@ class GameRepositoryImpl @Inject constructor(
 
     override suspend fun acceptContract(contract: ContractEntity): Result<Unit> = runCatching {
         require(contract.status == ContractStatus.AVAILABLE.name) { "Contrato indisponível" }
-        val companyForContract = companyDao.get() ?: error("Empresa não inicializada")
-        val contractAccess = expansionRepository.contractAccess(contract.difficulty, companyForContract.companyLevel)
-        require(contractAccess.allowed) { contractAccess.reason }
         contractDao.update(
             contract.copy(
                 status = ContractStatus.ACTIVE.name,
@@ -610,15 +596,13 @@ class GameRepositoryImpl @Inject constructor(
             ) { "Contrato não está ativo" }
             require(current.completedQuantity >= current.quantity) { "A produção do contrato ainda não terminou" }
 
-            val rewardPaid = contractDao.settleReward(
+            contractDao.settleReward(
                 contract = current,
                 payout = contractPayoutTransaction(
                     current,
                     "Contrato concluído: ${current.clientName}"
                 )
             )
-
-            if (rewardPaid) expansionRepository.consumeBoundTool(current.id)
 
             val latestCompany = companyDao.get() ?: error("Empresa não inicializada")
             val correctedLevel = (1 + latestCompany.reputation / 20).coerceAtLeast(latestCompany.companyLevel)

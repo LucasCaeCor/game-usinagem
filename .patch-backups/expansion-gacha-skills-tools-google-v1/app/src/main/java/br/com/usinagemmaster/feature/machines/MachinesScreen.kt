@@ -1,7 +1,5 @@
 package br.com.usinagemmaster.feature.machines
 
-import br.com.usinagemmaster.feature.expansion.ExpansionHubDialog
-
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -60,12 +58,6 @@ fun MachinesScreen(
     onNavigate: (String) -> Unit = {},
     vm: MachinesViewModel = hiltViewModel()
 ) {
-    // EXPANSION_HUB_INJECTED
-    val expansionHubVisible = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-
-    if (expansionHubVisible.value) {
-        ExpansionHubDialog(onDismiss = { expansionHubVisible.value = false })
-    }
     val machines by vm.machines.collectAsState()
     val employees by vm.employees.collectAsState()
     val production by vm.production.collectAsState()
@@ -947,12 +939,12 @@ private fun WarehouseLayout(
         shape = RoundedCornerShape(20.dp)
     ) {
         BoxWithConstraints(
-            Modifier.fillMaxWidth().height(if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 390) 472.dp else 540.dp).padding(8.dp).background(MaterialTheme.colorScheme.background.copy(alpha = .45f), RoundedCornerShape(14.dp))
+            Modifier.fillMaxWidth().height(560.dp).padding(8.dp).background(MaterialTheme.colorScheme.background.copy(alpha = .45f), RoundedCornerShape(14.dp))
         ) {
             val columns = 5
             val rows = 6
             val cellWidth = maxWidth / columns
-            val cellHeight = if (maxWidth < 390.dp) 76.dp else 86.dp
+            val cellHeight = 90.dp
             val cellWidthPx = with(density) { cellWidth.toPx() }
             val cellHeightPx = with(density) { cellHeight.toPx() }
 
@@ -981,7 +973,7 @@ private fun WarehouseLayout(
                             )
                         }
                         .width((cellWidth - 6.dp).coerceAtLeast(54.dp))
-                        .height(if (maxWidth < 390.dp) 68.dp else 78.dp)
+                        .height(82.dp)
                         .pointerInput(machine.id, machine.gridX, machine.gridY) {
                             detectDragGestures(
                                 onDragEnd = {

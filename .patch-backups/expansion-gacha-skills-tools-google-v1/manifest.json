@@ -1,0 +1,20 @@
+{
+  "patchId": "expansion-gacha-skills-tools-google-v1",
+  "created": [
+    "app/src/main/java/br/com/usinagemmaster/domain/expansion/ExpansionModels.kt",
+    "app/src/main/java/br/com/usinagemmaster/data/preferences/ExpansionRepository.kt",
+    "app/src/main/java/br/com/usinagemmaster/data/social/CharacterRentalService.kt",
+    "app/src/main/java/br/com/usinagemmaster/feature/expansion/GoogleAuthBridge.kt",
+    "app/src/main/java/br/com/usinagemmaster/feature/expansion/ExpansionViewModel.kt",
+    "app/src/main/java/br/com/usinagemmaster/feature/expansion/ExpansionHubDialog.kt",
+    "app/src/test/java/br/com/usinagemmaster/domain/expansion/ExpansionRulesTest.kt"
+  ],
+  "modified": [
+    "app/build.gradle.kts",
+    "app/src/main/java/br/com/usinagemmaster/domain/simulation/ProductionEngine.kt",
+    "app/src/main/java/br/com/usinagemmaster/data/repository/GameRepositoryImpl.kt",
+    "app/src/main/java/br/com/usinagemmaster/feature/machines/MachinesScreen.kt",
+    "firestore.rules",
+    "firebase/firestore.rules"
+  ]
+}

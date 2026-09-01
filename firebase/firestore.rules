@@ -1,6 +1,26 @@
 rules_version = '2';
 service cloud.firestore {
-  match /databases/{database}/documents {
+  match /databases/{database
+    // EXPANSION_CHARACTER_MARKET
+    match /character_offers/{ownerId} {
+      allow read: if request.auth != null;
+      allow create, delete: if request.auth != null && request.auth.uid == ownerId;
+      allow update: if request.auth != null && (
+        request.auth.uid == ownerId ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leasedBy', 'leasedUntil']) &&
+          request.resource.data.leasedBy == request.auth.uid &&
+          resource.data.leasedUntil <= request.time &&
+          request.resource.data.leasedUntil > request.time
+        )
+      );
+    }
+    match /character_rentals/{rentalId} {
+      allow create: if request.auth != null && request.resource.data.renterUid == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.renterUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow update, delete: if false;
+    }
+}/documents {
     function signedIn() {
       return request.auth != null;
     }
