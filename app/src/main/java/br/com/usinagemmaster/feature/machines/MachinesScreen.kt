@@ -1,5 +1,7 @@
 package br.com.usinagemmaster.feature.machines
 
+import br.com.usinagemmaster.feature.expansion.ExpansionLauncherCard
+
 import br.com.usinagemmaster.feature.expansion.ExpansionHubDialog
 
 import androidx.compose.animation.core.LinearEasing
@@ -154,6 +156,8 @@ fun MachinesScreen(
                 }
                 item {
                     WarehouseTabs(mode = mode, onMode = { mode = it })
+                // EXPANSION_LAUNCHER_V2
+                ExpansionLauncherCard(onOpen = { expansionHubVisible.value = true })
                 }
                 item {
                     FactoryActionRow(
@@ -234,6 +238,8 @@ fun MachinesScreen(
                     waiting = production.idleMachines
                 )
                 WarehouseTabs(mode = mode, onMode = { mode = it })
+                // EXPANSION_LAUNCHER_V2
+                ExpansionLauncherCard(onOpen = { expansionHubVisible.value = true })
                 FactoryStatusRow(
                     active = production.operatingMachines,
                     waiting = production.idleMachines,

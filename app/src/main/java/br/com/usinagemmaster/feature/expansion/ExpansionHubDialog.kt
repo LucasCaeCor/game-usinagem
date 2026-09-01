@@ -1,5 +1,19 @@
 package br.com.usinagemmaster.feature.expansion
 
+import kotlin.random.Random
+
+import androidx.compose.animation.core.tween
+
+import androidx.compose.animation.core.Animatable
+
+import androidx.compose.ui.graphics.graphicsLayer
+
+import androidx.compose.ui.graphics.Color
+
+import androidx.compose.ui.Alignment
+
+import androidx.compose.foundation.Canvas
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -83,6 +97,7 @@ private fun GachaTab(state: ExpansionUiState, vm: ExpansionViewModel) {
                 Text("Roleta Industrial", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("Fichas: ${state.expansion.gachaTickets} • Pity épico ${state.expansion.pityEpic}/30 • lendário ${state.expansion.pityLegendary}/80")
                 Text("Pode vir personagem, skin, ferramenta rara, máquina premium ou ficha bônus. Itens top têm chance bem menor.")
+                GachaWheelV2(state = state, vm = vm)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = vm::roll, enabled = !state.busy && state.expansion.gachaTickets > 0) { Text("Girar") }
                     OutlinedButton(onClick = vm::claimDailyTicket, enabled = !state.busy) { Text("Ficha diária") }
@@ -304,3 +319,115 @@ private fun AccountTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 
 private fun money(cents: Long): String = NumberFormat.getCurrencyInstance(Locale("pt", "BR")).format(cents / 100.0)
 private fun dateTime(millis: Long): String = java.text.SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR")).format(java.util.Date(millis))
+
+
+/**
+ * Entrada explícita para os sistemas da expansão.
+ * Fica logo abaixo das abas da Fábrica para não depender de navegação escondida.
+ */
+@Composable
+fun ExpansionLauncherCard(onOpen: () -> Unit) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "🎰 CENTRO DE EVOLUÇÃO",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black
+            )
+            Text(
+                "Roleta Gacha • Personagens • Skins • Máquinas TOP • Ferramentas • Especialidade • Árvore de Skills",
+                style = MaterialTheme.typography.bodySmall
+            )
+            FilledTonalButton(
+                onClick = onOpen,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("ABRIR ROLETA E EVOLUÇÃO")
+            }
+        }
+    }
+}
+
+
+// GACHA_WHEEL_V2
+@Composable
+private fun GachaWheelV2(state: ExpansionUiState, vm: ExpansionViewModel) {
+    val rotation = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var spinning by remember { mutableStateOf(false) }
+    val wheelColors = listOf(
+        Color(0xFF455A64), Color(0xFF1565C0), Color(0xFF6A1B9A), Color(0xFFF9A825),
+        Color(0xFF2E7D32), Color(0xFFC62828), Color(0xFF00838F), Color(0xFF5D4037)
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("▼", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+        Box(
+            modifier = Modifier.size(238.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(rotationZ = rotation.value)
+            ) {
+                val sweep = 360f / wheelColors.size
+                wheelColors.forEachIndexed { index, color ->
+                    drawArc(
+                        color = color,
+                        startAngle = -90f + index * sweep,
+                        sweepAngle = sweep - 1.5f,
+                        useCenter = true
+                    )
+                }
+                drawCircle(
+                    color = Color(0xFFF5F5F5),
+                    radius = size.minDimension * 0.14f
+                )
+            }
+            Text("⚙️", style = MaterialTheme.typography.displaySmall)
+        }
+
+        Text(
+            "PERSONAGEM • SKIN • FERRAMENTA • MÁQUINA TOP • FICHAS",
+            style = MaterialTheme.typography.labelSmall
+        )
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !spinning && !state.busy && state.expansion.gachaTickets > 0,
+            onClick = {
+                if (spinning) return@Button
+                spinning = true
+                scope.launch {
+                    val extra = Random.nextInt(0, 360)
+                    rotation.animateTo(
+                        targetValue = rotation.value + 1440f + extra,
+                        animationSpec = tween(durationMillis = 2400)
+                    )
+                    vm.roll()
+                    spinning = false
+                }
+            }
+        ) {
+            Text(
+                if (spinning) "GIRANDO..." 
+                else "🎰 GIRAR ROLETA • 1 FICHA"
+            )
+        }
+    }
+}
