@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.feature.social
+import br.com.usinagemmaster.feature.community.CommunityFactoryButton
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -60,6 +61,8 @@ fun SocialScreen(
                 item {
                     Card(border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .35f))) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            CommunityFactoryButton()
+
                             Text("Crie seu dono da fábrica", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                             Text("Antes de entrar na Comunidade, escolha nome, uniforme, capacete e aparência.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Button(onClick = onEditProfile, modifier = Modifier.fillMaxWidth()) {

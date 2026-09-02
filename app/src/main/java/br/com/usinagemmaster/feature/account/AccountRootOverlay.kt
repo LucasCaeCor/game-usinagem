@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 fun AccountRootOverlay(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var authUser by remember { mutableStateOf<FirebaseUser?>(GoogleAuthBridge.currentUser()) }
+    var authUser by remember { mutableStateOf<FirebaseUser?>(GoogleAuthBridge.currentGoogleUser()) }
     var linkState by remember { mutableStateOf(AccountLinkStore.state(context)) }
     var showProfile by rememberSaveable { mutableStateOf(false) }
     var showStartup by rememberSaveable {
@@ -39,7 +39,7 @@ fun AccountRootOverlay(content: @Composable () -> Unit) {
     DisposableEffect(Unit) {
         val auth = runCatching { FirebaseAuth.getInstance() }.getOrNull()
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            authUser = firebaseAuth.currentUser
+            authUser = firebaseAuth.currentUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
             linkState = AccountLinkStore.state(context)
         }
         auth?.addAuthStateListener(listener)
@@ -70,7 +70,7 @@ fun AccountRootOverlay(content: @Composable () -> Unit) {
     }
 
     fun linkSignedUser(closeAfter: Boolean) {
-        val user = authUser ?: return loginAndLink(closeAfter)
+        val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) } ?: return loginAndLink(closeAfter)
         if (busy) return
         scope.launch {
             busy = true
@@ -125,7 +125,7 @@ fun AccountRootOverlay(content: @Composable () -> Unit) {
             onGoogle = { loginAndLink(false) },
             onLink = { linkSignedUser(false) },
             onRetryCloud = {
-                val user = authUser
+                val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
                 if (user == null) {
                     message = "Entre com Google antes de sincronizar."
                 } else {
@@ -173,7 +173,7 @@ private fun StartupAccountDialog(
                 Text("Usinagem Master", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (user == null) "Conecte sua conta Google para identificar e proteger seu progresso."
+                    if (user == null) "Conecte uma conta Google real. Se o jogo já criou uma UID temporária, ela será vinculada ao Google sem apagar seu progresso."
                     else "Sua conta Google foi encontrada. Vincule a empresa que já existe neste aparelho.",
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodyLarge,

@@ -31,6 +31,7 @@ class ExpansionRepository @Inject constructor(
         val tickets = intPreferencesKey("gacha_tickets")
         val pityEpic = intPreferencesKey("pity_epic")
         val pityLegendary = intPreferencesKey("pity_legendary")
+        val playerXp = longPreferencesKey("player_xp")
         val ownedSkins = stringSetPreferencesKey("owned_skins")
         val equippedSkin = stringPreferencesKey("equipped_skin")
         val ownedCharacters = stringSetPreferencesKey("owned_characters")
@@ -69,8 +70,10 @@ class ExpansionRepository @Inject constructor(
         val def = ExpansionCatalog.playerSkills.firstOrNull { it.id == id } ?: error("Skill inválida")
         require(id !in state.playerSkills) { "Skill já aprendida" }
         require(state.playerSkillPoints(companyLevel) > 0) { "Sem pontos de skill do personagem" }
-        require(ExpansionCatalog.canUnlock(def, companyLevel, state.playerSkills)) { "Pré-requisito ou nível insuficiente" }
+        require(ExpansionCatalog.canUnlock(def, state.playerLevel(), state.playerSkills)) { "Pré-requisito ou nível do personagem insuficiente" }
         context.expansionDataStore.edit { prefs -> prefs[Keys.playerSkills] = (prefs[Keys.playerSkills] ?: emptySet()) + id }
+        // V7_PLAYER_XP_RESEARCH
+        addPlayerXp(ExpansionProgression.characterXpForResearch())
     }
 
     suspend fun equipSkin(id: String, companyLevel: Int) {
@@ -147,6 +150,16 @@ class ExpansionRepository @Inject constructor(
         return result ?: error("Falha ao sortear recompensa")
     }
 
+    suspend fun addTickets(amount: Int): Int {
+        require(amount > 0) { "Quantidade de fichas inválida" }
+        var total = 0
+        context.expansionDataStore.edit { prefs ->
+            total = (prefs[Keys.tickets] ?: 5) + amount
+            prefs[Keys.tickets] = total
+        }
+        return total
+    }
+
     suspend fun bindTool(contractId: String, toolId: String?) {
         context.expansionDataStore.edit { prefs ->
             val inventory = parseCounts(prefs[Keys.tools] ?: emptySet())
@@ -221,7 +234,27 @@ class ExpansionRepository @Inject constructor(
         return ContractAccess(true)
     }
 
-    suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, endsAt: Long) {
+            suspend fun ensurePlayerXpBaseline(companyLevel: Int) {
+        val current = snapshot()
+        if (current.playerXp > 0L || companyLevel <= 1) return
+        val targetPlayerLevel = (1 + (companyLevel - 1) / 2).coerceIn(1, 20)
+        val baseline = ExpansionProgression.totalXpAtStartOfPlayerLevel(targetPlayerLevel)
+        if (baseline > 0L) context.expansionDataStore.edit { prefs ->
+            if ((prefs[Keys.playerXp] ?: 0L) <= 0L) prefs[Keys.playerXp] = baseline
+        }
+    }
+
+suspend fun addPlayerXp(amount: Long): Long {
+        if (amount <= 0L) return snapshot().playerXp
+        var total = 0L
+        context.expansionDataStore.edit { prefs ->
+            total = ((prefs[Keys.playerXp] ?: 0L) + amount).coerceAtLeast(0L)
+            prefs[Keys.playerXp] = total
+        }
+        return total
+    }
+
+suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, endsAt: Long) {
         context.expansionDataStore.edit { prefs ->
             prefs[Keys.remoteOwnerUid] = ownerUid
             prefs[Keys.remoteName] = name
@@ -248,6 +281,7 @@ class ExpansionRepository @Inject constructor(
         gachaTickets = prefs[Keys.tickets] ?: 5,
         pityEpic = prefs[Keys.pityEpic] ?: 0,
         pityLegendary = prefs[Keys.pityLegendary] ?: 0,
+        playerXp = prefs[Keys.playerXp] ?: 0L,
         ownedSkins = (prefs[Keys.ownedSkins] ?: emptySet()) + "operador_padrao",
         equippedSkin = prefs[Keys.equippedSkin] ?: "operador_padrao",
         ownedCharacters = prefs[Keys.ownedCharacters] ?: emptySet(),

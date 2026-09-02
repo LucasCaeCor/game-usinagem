@@ -14,4 +14,7 @@ interface GoalDao {
     @Query("SELECT COUNT(*) FROM goals") suspend fun count(): Int
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(values: List<GoalEntity>)
     @Update suspend fun update(value: GoalEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMissing(goals: List<GoalEntity>)
 }

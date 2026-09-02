@@ -1,4 +1,6 @@
 package br.com.usinagemmaster.feature.machines
+import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
+import br.com.usinagemmaster.data.preferences.ExpansionRepository
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -30,7 +32,9 @@ class MachinesViewModel @Inject constructor(
     private val repo: GameRepository,
     private val prefs: GamePreferences,
     playerProfilePreferences: PlayerProfilePreferences,
-    private val social: SocialRepository
+    private val social: SocialRepository,
+    private val expansionRepository: ExpansionRepository,
+    private val premiumMachineInstaller: PremiumMachineInstaller
 ) : ViewModel() {
     val machines = repo.machines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<MachineEntity>())
     val employees = repo.employees().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<EmployeeEntity>())
@@ -44,6 +48,13 @@ class MachinesViewModel @Inject constructor(
     private var lastPresenceAt = 0L
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
+
+    // V5_PREMIUM_MACHINE_SYNC
+    init {
+        viewModelScope.launch {
+            runCatching { premiumMachineInstaller.syncOwned(expansionRepository.snapshot().premiumMachines) }
+        }
+    }
 
     fun move(machineId: String, x: Int, y: Int) = viewModelScope.launch {
         _message.value = repo.moveMachine(machineId, x, y).exceptionOrNull()?.message

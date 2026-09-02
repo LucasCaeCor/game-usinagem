@@ -129,4 +129,8 @@ interface ContractDao {
     @Query("DELETE FROM contracts WHERE id = :contractId AND status = 'COMPLETED'")
     suspend fun dismissCompleted(contractId: String)
 
+
+    /** FAILED é só histórico; apagar não devolve multa/reputação. */
+    @Query("DELETE FROM contracts WHERE id = :contractId AND status = 'FAILED'")
+    suspend fun dismissFailed(contractId: String)
 }

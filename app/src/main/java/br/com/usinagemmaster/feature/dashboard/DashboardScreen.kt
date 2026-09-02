@@ -231,6 +231,18 @@ private fun LiveCompanyHeader(
                 Text("★ Reputação $reputation", style = MaterialTheme.typography.bodySmall)
                 Text("Galpão $space", style = MaterialTheme.typography.bodySmall)
             }
+        // V7_FACTORY_XP_DASHBOARD
+        val factoryXp = br.com.usinagemmaster.domain.expansion.ExpansionProgression.factory(companyLevel, reputation)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("XP DA FÁBRICA", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Text("${factoryXp.current}/${factoryXp.needed} XP", style = MaterialTheme.typography.labelSmall)
+        }
+        LinearProgressIndicator(
+            progress = { factoryXp.fraction },
+            modifier = Modifier.fillMaxWidth().height(8.dp),
+        )
+
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(
                 progress = { if (operating + idle == 0) 0f else operating.toFloat() / (operating + idle).toFloat() },

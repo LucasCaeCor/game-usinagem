@@ -45,6 +45,7 @@ data class ExpansionState(
     val gachaTickets: Int = 5,
     val pityEpic: Int = 0,
     val pityLegendary: Int = 0,
+    val playerXp: Long = 0L,
     val ownedSkins: Set<String> = setOf("operador_padrao"),
     val equippedSkin: String = "operador_padrao",
     val ownedCharacters: Set<String> = emptySet(),
@@ -145,8 +146,11 @@ data class ExpansionState(
     }
 
     fun companySkillPoints(companyLevel: Int): Int = max(0, companyLevel / 2 - companySkills.size)
-    fun playerSkillPoints(companyLevel: Int): Int = max(0, 1 + companyLevel / 3 - playerSkills.size)
-    fun playerRentalBoostPct(): Int = (4 + playerSkills.size * 2 + if ("negociacao" in playerSkills) 3 else 0).coerceAtMost(20)
+    fun playerSkillPoints(companyLevel: Int): Int = max(0, 1 + playerLevel() / 2 + companyLevel / 6 - playerSkills.size)
+    fun playerRentalBoostPct(): Int = (4 + playerSkills.size * 2 + playerLevel() / 4 + if ("negociacao" in playerSkills) 3 else 0).coerceAtMost(25)
+
+    fun playerProgress(): XpProgress = ExpansionProgression.player(playerXp)
+    fun playerLevel(): Int = playerProgress().level
 }
 
 enum class CompanySpecialty(val code: String, val label: String, val minLevel: Int, val description: String) {

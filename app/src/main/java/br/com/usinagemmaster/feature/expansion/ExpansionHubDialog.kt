@@ -1,4 +1,6 @@
 package br.com.usinagemmaster.feature.expansion
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
@@ -377,6 +379,17 @@ private fun CompletedContractsTab(state: ExpansionUiState, vm: ExpansionViewMode
 @Composable
 private fun CompanyTab(state: ExpansionUiState, vm: ExpansionViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // V7_FACTORY_XP_CARD
+        item {
+            val xp = ExpansionProgression.factory(state.companyLevel, state.reputation)
+            XpProgressCard(
+                icon = "🏭",
+                title = "Nível da fábrica",
+                progress = xp,
+                explanation = "Como ganhar XP: conclua contratos e preserve a reputação. Cada +1 de reputação vale 100 XP da fábrica; 20 pontos de reputação completam um nível (2.000 XP). Multas e falhas podem reduzir reputação, mas um nível já conquistado não cai.",
+            )
+        }
+
         item {
             Text("Especialidade da empresa", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Defina o foco técnico. Especialidades mais avançadas liberam com o nível.")
@@ -399,29 +412,58 @@ private fun CompanyTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 @Composable
 private fun PremiumMachineCard(machine: PremiumMachineDefinition, state: ExpansionUiState, vm: ExpansionViewModel, showBuy: Boolean) {
     val owned = machine.id in state.expansion.premiumMachines
-    ElevatedCard { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("🏭", style = MaterialTheme.typography.headlineLarge)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${machine.rarity.label} • ${machine.name}", fontWeight = FontWeight.Bold)
-            Text(machine.description, style = MaterialTheme.typography.bodySmall)
-            Text("Nível ${machine.minLevel} • ${money(machine.priceCents)}", style = MaterialTheme.typography.labelMedium)
-            if (owned) Text("INSTALADA • bônus permanente", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            if (showBuy && !owned) {
-                Button(onClick = { vm.buyPremiumMachine(machine.id) }, enabled = !state.busy && state.companyLevel >= machine.minLevel && state.cashCents >= machine.priceCents) {
-                    Text(if (state.companyLevel < machine.minLevel) "Bloqueada" else "Comprar")
+    ElevatedCard {
+        Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(14.dp), color = if (owned) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+                Text("🏭", Modifier.padding(12.dp), style = MaterialTheme.typography.headlineLarge)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("${machine.rarity.label} • ${machine.name}", fontWeight = FontWeight.Black)
+                Text(machine.description, style = MaterialTheme.typography.bodySmall)
+                Text("Nível ${machine.minLevel} • ${money(machine.priceCents)}", style = MaterialTheme.typography.labelMedium)
+                if (owned) {
+                    Text("ADQUIRIDA • bônus premium ativo", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    OutlinedButton(onClick = { vm.installPremiumMachine(machine.id) }, enabled = !state.busy) {
+                        Text("Instalar / localizar no galpão")
+                    }
+                } else if (showBuy) {
+                    Button(onClick = { vm.buyPremiumMachine(machine.id) }, enabled = !state.busy && state.companyLevel >= machine.minLevel && state.cashCents >= machine.priceCents) {
+                        Text(if (state.companyLevel < machine.minLevel) "Bloqueada" else "Comprar")
+                    }
                 }
             }
         }
-    } }
+    }
 }
 
 @Composable
 private fun SkillsTab(state: ExpansionUiState, vm: ExpansionViewModel) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("Árvore da empresa • ${state.expansion.companySkillPoints(state.companyLevel)} ponto(s)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        items(ExpansionCatalog.companySkills) { skill -> SkillCard(skill, skill.id in state.expansion.companySkills, state.companyLevel, state.expansion.companySkills) { vm.unlockCompanySkill(skill.id) } }
-        item { HorizontalDivider(); Text("Árvore do personagem • ${state.expansion.playerSkillPoints(state.companyLevel)} ponto(s)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        items(ExpansionCatalog.playerSkills) { skill -> SkillCard(skill, skill.id in state.expansion.playerSkills, state.companyLevel, state.expansion.playerSkills) { vm.unlockPlayerSkill(skill.id) } }
+    var tree by rememberSaveable { mutableStateOf("company") }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🔬 Pesquisa & Desenvolvimento", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text("Os pontos agora seguem ramificações. Pesquise a base para abrir tecnologias mais avançadas.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = tree == "company", onClick = { tree = "company" }, label = { Text("🏭 Empresa") })
+                        FilterChip(selected = tree == "player", onClick = { tree = "player" }, label = { Text("👷 Personagem") })
+                    }
+                    val points = if (tree == "company") state.expansion.companySkillPoints(state.companyLevel) else state.expansion.playerSkillPoints(state.companyLevel)
+                    Text("PONTOS DE PESQUISA DISPONÍVEIS: $points", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        item {
+            val skills = if (tree == "company") ExpansionCatalog.companySkills else ExpansionCatalog.playerSkills
+            val owned = if (tree == "company") state.expansion.companySkills else state.expansion.playerSkills
+            val unlock: (String) -> Unit = if (tree == "company") vm::unlockCompanySkill else vm::unlockPlayerSkill
+            ResearchTree(skills, owned, if (tree == "company") state.companyLevel else state.expansion.playerLevel(), unlock)
+        }
     }
 }
 
@@ -474,6 +516,17 @@ private fun ToolsTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 @Composable
 private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // V7_CHARACTER_XP_CARD
+        item {
+            val xp = state.expansion.playerProgress()
+            XpProgressCard(
+                icon = "👷",
+                title = "Nível do personagem",
+                progress = xp,
+                explanation = "Como ganhar XP: conclua contratos (dificuldade, volume e qualidade aumentam o ganho) e desenvolva pesquisas/skills do personagem. O XP é permanente e não é perdido ao cancelar ou falhar contratos.",
+            )
+        }
+
         item {
             Text("Personagem principal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Skin equipada: ${ExpansionCatalog.skins.firstOrNull { it.id == state.expansion.equippedSkin }?.name ?: state.expansion.equippedSkin}")
@@ -531,7 +584,7 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 private fun RentalOfferCard(offer: CharacterOffer, state: ExpansionUiState, vm: ExpansionViewModel) {
     ElevatedCard { Column(Modifier.padding(14.dp)) {
         Text(offer.playerName, fontWeight = FontWeight.Bold)
-        Text("Benefício: +${offer.boostPct}% produção por 48h")
+        Text("Personagem nível ${offer.characterLevel} • benefício +${offer.boostPct}% produção por 48h")
         Text("Skills: ${if (offer.skills.isEmpty()) "iniciante" else offer.skills.joinToString()}", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { vm.hire(offer) }, enabled = !state.busy) { Text("Contratar por 2 dias") }
     } }
@@ -586,5 +639,99 @@ fun ExpansionLauncherCard(onOpen: () -> Unit) {
     }
 }
 
+@Composable
+private fun XpProgressCard(icon: String, title: String, progress: XpProgress, explanation: String) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(icon, style = MaterialTheme.typography.headlineSmall)
+                    Column {
+                        Text(title, fontWeight = FontWeight.Black)
+                        Text("Nível ${progress.level}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Text("${progress.current} / ${progress.needed} XP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            }
+            LinearProgressIndicator(
+                progress = { progress.fraction },
+                modifier = Modifier.fillMaxWidth().height(10.dp),
+            )
+            Text("XP total: ${progress.total}", style = MaterialTheme.typography.labelSmall)
+            TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
+                Text(if (expanded) "Ocultar como ganhar XP" else "Como ganhar XP?")
+            }
+            if (expanded) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
+                    Text(explanation, Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
 private fun money(cents: Long): String = NumberFormat.getCurrencyInstance(Locale("pt", "BR")).format(cents / 100.0)
 private fun dateTime(millis: Long): String = java.text.SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR")).format(java.util.Date(millis))
+
+
+@Composable
+private fun ResearchTree(skills: List<SkillDefinition>, owned: Set<String>, level: Int, unlock: (String) -> Unit) {
+    val roots = skills.filter { it.prerequisite == null }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+            Text("⚙️ NÚCLEO DE P&D", Modifier.padding(horizontal = 22.dp, vertical = 13.dp), fontWeight = FontWeight.Black)
+        }
+        Box(Modifier.width(3.dp).height(22.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .65f)))
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            roots.forEach { root ->
+                ResearchBranch(root, skills, owned, level, unlock)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResearchBranch(root: SkillDefinition, all: List<SkillDefinition>, owned: Set<String>, level: Int, unlock: (String) -> Unit) {
+    Column(Modifier.width(210.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        ResearchNode(root, owned, level, unlock)
+        val children = all.filter { it.prerequisite == root.id }
+        children.forEach { child ->
+            Box(Modifier.width(3.dp).height(18.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = .55f)))
+            ResearchNode(child, owned, level, unlock)
+            all.filter { it.prerequisite == child.id }.forEach { grandChild ->
+                Box(Modifier.width(3.dp).height(18.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = .55f)))
+                ResearchNode(grandChild, owned, level, unlock)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResearchNode(skill: SkillDefinition, owned: Set<String>, level: Int, unlock: (String) -> Unit) {
+    val learned = skill.id in owned
+    val prereqOk = skill.prerequisite == null || skill.prerequisite in owned
+    val available = !learned && level >= skill.minLevel && prereqOk
+    val container = when {
+        learned -> MaterialTheme.colorScheme.primaryContainer
+        available -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container),
+        border = BorderStroke(1.dp, if (learned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = .35f))
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(if (learned) "✓ ${skill.name}" else if (available) "🔬 ${skill.name}" else "🔒 ${skill.name}", fontWeight = FontWeight.Black)
+            Text(skill.description, style = MaterialTheme.typography.bodySmall)
+            Text("Nível ${skill.minLevel}${skill.prerequisite?.let { " • depende de pesquisa anterior" } ?: " • ramo inicial"}", style = MaterialTheme.typography.labelSmall)
+            if (!learned) FilledTonalButton(onClick = { unlock(skill.id) }, enabled = available, modifier = Modifier.fillMaxWidth()) {
+                Text(if (available) "Pesquisar • 1 ponto" else "Bloqueada")
+            }
+        }
+    }
+}

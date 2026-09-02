@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.data.repository
+import br.com.usinagemmaster.domain.expansion.ExpansionProgression
 
 import br.com.usinagemmaster.domain.expansion.ExpansionState
 
@@ -87,6 +88,8 @@ class GameRepositoryImpl @Inject constructor(
             return null
         }
 
+        // V5: sincroniza metas novas em saves antigos sem duplicar as existentes.
+        seedGoals()
         // Garante que saves da v4+ ganhem missões antes de calcular o período offline.
         syncLegendaryMissionSeeds()
 
@@ -253,6 +256,8 @@ class GameRepositoryImpl @Inject constructor(
                         )
                     )
                     if (paidNow) contractRewards += contract.rewardCents
+            // V7_XP_AUTO_CONTRACT
+            if (paidNow) expansionRepository.addPlayerXp(ExpansionProgression.characterXpForContract(contract.difficulty, contract.quantity, contract.requiredQuality))
                     completedContracts++
                 } else {
                     contractDao.update(
@@ -381,12 +386,24 @@ class GameRepositoryImpl @Inject constructor(
     }
 
     private suspend fun seedGoals() {
-        if (goalDao.count() > 0) return
-        goalDao.insertAll(
+        goalDao.insertMissing(
             listOf(
                 GoalEntity("first_employee", "Contrate seu primeiro funcionário", 1, 0, 250_000, false),
                 GoalEntity("three_machines", "Tenha 3 máquinas instaladas", 3, 1, 500_000, false),
-                GoalEntity("reputation_10", "Alcance 10 de reputação", 10, 0, 750_000, false)
+                GoalEntity("reputation_10", "Alcance 10 de reputação", 10, 0, 750_000, false),
+
+                GoalEntity("ten_machines", "Complexo industrial • 10 máquinas", 10, 0, 25_000_000, false),
+                GoalEntity("twenty_machines", "Parque fabril gigante • 20 máquinas", 20, 0, 75_000_000, false),
+                GoalEntity("thirty_machines", "IMPÉRIO INDUSTRIAL • 30 máquinas • +10 fichas", 30, 0, 200_000_000, false),
+                GoalEntity("fifteen_employees", "Equipe de elite • 15 funcionários", 15, 0, 50_000_000, false),
+                GoalEntity("thirty_employees", "Mega operação • 30 funcionários • +8 fichas", 30, 0, 180_000_000, false),
+                GoalEntity("reputation_100", "Referência regional • 100 reputação", 100, 0, 80_000_000, false),
+                GoalEntity("reputation_250", "Lenda da indústria • 250 reputação • +10 fichas", 250, 0, 250_000_000, false),
+                GoalEntity("reputation_500", "Nome mundial • 500 reputação • +20 fichas", 500, 0, 600_000_000, false),
+                GoalEntity("company_level_10", "Empresa nível 10", 10, 0, 100_000_000, false),
+                GoalEntity("company_level_20", "Empresa nível 20 • +15 fichas", 20, 0, 500_000_000, false),
+                GoalEntity("warehouse_300", "Galpão de 300 m²", 300, 0, 120_000_000, false),
+                GoalEntity("warehouse_500", "Mega galpão de 500 m² • +10 fichas", 500, 0, 300_000_000, false),
             )
         )
     }
@@ -602,6 +619,35 @@ class GameRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun cancelContract(contractId: String): Result<Long> = runCatching {
+        val penalty = simulationMutex.withLock {
+            val current = contractDao.byId(contractId) ?: error("Contrato não encontrado")
+            require(current.status == ContractStatus.ACTIVE.name) { "Somente contratos ativos podem ser cancelados" }
+            val company = companyDao.get() ?: error("Empresa não inicializada")
+            val penalty = current.penaltyCents.coerceAtLeast(1L)
+            require(company.cashCents >= penalty) { "Caixa insuficiente para pagar a multa de cancelamento" }
+
+            contractDao.update(current.copy(status = ContractStatus.FAILED.name))
+            companyDao.upsert(
+                company.copy(
+                    cashCents = company.cashCents - penalty,
+                    reputation = (company.reputation - current.reputationPenalty).coerceAtLeast(0)
+                )
+            )
+            financeDao.insert(transaction(TransactionType.EXPENSE, TransactionCategory.CONTRACT, penalty, "Multa por descumprimento: ${current.clientName}"))
+            runCatching { expansionRepository.bindTool(current.id, null) }
+            penalty
+        }
+        generateContractsIfNeeded()
+        penalty
+    }
+
+    override suspend fun dismissFailedContract(contractId: String): Result<Unit> = runCatching {
+        val current = contractDao.byId(contractId) ?: error("Contrato não encontrado")
+        require(current.status == ContractStatus.FAILED.name) { "Somente contratos com falha podem ser excluídos" }
+        contractDao.dismissFailed(contractId)
+    }
+
     override suspend fun completeContract(contract: ContractEntity): Result<Unit> = runCatching {
         simulationMutex.withLock {
             val current = contractDao.byId(contract.id) ?: error("Contrato não encontrado")
@@ -619,6 +665,8 @@ class GameRepositoryImpl @Inject constructor(
             )
 
             if (rewardPaid) expansionRepository.consumeBoundTool(current.id)
+            // V7_XP_MANUAL_CONTRACT
+            if (rewardPaid) expansionRepository.addPlayerXp(ExpansionProgression.characterXpForContract(current.difficulty, current.quantity, current.requiredQuality))
 
             val latestCompany = companyDao.get() ?: error("Empresa não inicializada")
             val correctedLevel = (1 + latestCompany.reputation / 20).coerceAtLeast(latestCompany.companyLevel)
@@ -667,14 +715,27 @@ class GameRepositoryImpl @Inject constructor(
         val company = companyDao.get() ?: error("Empresa não inicializada")
         val currentProgress = when (goal.id) {
             "first_employee" -> if (employeeDao.getAll().isNotEmpty()) 1 else 0
-            "three_machines" -> machineDao.getAll().size
-            "reputation_10" -> company.reputation
+            "reputation_10", "reputation_100", "reputation_250", "reputation_500" -> company.reputation
+            "three_machines", "ten_machines", "twenty_machines", "thirty_machines" -> machineDao.getAll().size
+            "fifteen_employees", "thirty_employees" -> employeeDao.getAll().size
+            "company_level_10", "company_level_20" -> company.companyLevel
+            "warehouse_300", "warehouse_500" -> company.warehouseSpace
             else -> goal.progress
         }
         require(currentProgress >= goal.target) { "Meta ainda não concluída" }
         goalDao.update(goal.copy(progress = currentProgress, claimed = true))
         companyDao.upsert(company.copy(cashCents = company.cashCents + goal.rewardCents))
         financeDao.insert(transaction(TransactionType.INCOME, TransactionCategory.BONUS, goal.rewardCents, "Recompensa de meta: ${goal.title}"))
+        val bonusTickets = when (goal.id) {
+            "thirty_machines" -> 10
+            "thirty_employees" -> 8
+            "reputation_250" -> 10
+            "reputation_500" -> 20
+            "company_level_20" -> 15
+            "warehouse_500" -> 10
+            else -> 0
+        }
+        if (bonusTickets > 0) expansionRepository.addTickets(bonusTickets)
     }
 
     override suspend fun claimLegendaryMission(mission: LegendaryMissionEntity): Result<Unit> = runCatching {

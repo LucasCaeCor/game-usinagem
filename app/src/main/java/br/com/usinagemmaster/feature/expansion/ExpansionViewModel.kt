@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.feature.expansion
+import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +20,7 @@ import javax.inject.Inject
 data class ExpansionUiState(
     val expansion: ExpansionState = ExpansionState(),
     val companyLevel: Int = 1,
+    val reputation: Int = 0,
     val cashCents: Long = 0L,
     val activeContracts: List<ContractEntity> = emptyList(),
     val completedContracts: List<ContractEntity> = emptyList(),
@@ -36,6 +38,7 @@ class ExpansionViewModel @Inject constructor(
     private val gameRepository: GameRepository,
     private val rentalService: CharacterRentalService,
     private val contractDao: ContractDao,
+    private val premiumMachineInstaller: PremiumMachineInstaller,
 ) : ViewModel() {
     private val extras = MutableStateFlow(ExpansionUiState())
 
@@ -49,6 +52,7 @@ class ExpansionViewModel @Inject constructor(
         extra.copy(
             expansion = expansion,
             companyLevel = dashboard.companyLevel,
+            reputation = dashboard.reputation,
             cashCents = dashboard.cashCents,
             activeContracts = contracts.filter { it.status == ContractStatus.ACTIVE.name },
             completedContracts = completed,
@@ -58,10 +62,17 @@ class ExpansionViewModel @Inject constructor(
     init {
         refreshAccount()
         viewModelScope.launch { expansionRepository.clearExpiredRemoteHire() }
+        viewModelScope.launch { premiumMachineInstaller.syncOwned(expansionRepository.snapshot().premiumMachines) }
+    
+        // V7_PLAYER_XP_BASELINE
+        viewModelScope.launch {
+            val dashboard = gameRepository.dashboard().first()
+            expansionRepository.ensurePlayerXpBaseline(dashboard.companyLevel)
+        }
     }
 
     fun refreshAccount(message: String? = null) {
-        val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
+        val user = GoogleAuthBridge.currentGoogleUser()
         extras.update { it.copy(accountName = user?.displayName, accountEmail = user?.email, message = message) }
     }
 
@@ -72,7 +83,16 @@ class ExpansionViewModel @Inject constructor(
     fun unlockPlayerSkill(id: String) = action { expansionRepository.unlockPlayerSkill(id, uiState.value.companyLevel) }
     fun equipSkin(id: String) = action { expansionRepository.equipSkin(id, uiState.value.companyLevel) }
     fun equipCharacter(id: String) = action { expansionRepository.equipCharacter(id, uiState.value.companyLevel) }
-    fun buyPremiumMachine(id: String) = action { expansionRepository.buyPremiumMachine(id, uiState.value.companyLevel) }
+    fun buyPremiumMachine(id: String) = action {
+        expansionRepository.buyPremiumMachine(id, uiState.value.companyLevel)
+        val installed = premiumMachineInstaller.install(id)
+        extras.update { it.copy(message = installed.message) }
+    }
+    fun installPremiumMachine(id: String) = action {
+        val installed = premiumMachineInstaller.install(id)
+        extras.update { it.copy(message = installed.message) }
+    }
+
     fun bindTool(contractId: String, toolId: String?) = action { expansionRepository.bindTool(contractId, toolId) }
 
     fun claimDailyTicket() = action {
@@ -94,12 +114,21 @@ class ExpansionViewModel @Inject constructor(
     /** Revela exatamente o prêmio que já determinou o setor vencedor da roda. */
     fun revealWheelReward(reward: GachaReward) {
         extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
+        if (reward.type == "machine" && reward.id != null) {
+            viewModelScope.launch {
+                val installed = premiumMachineInstaller.install(reward.id)
+                extras.update { it.copy(message = "${reward.rarity.label}: ${reward.title} • ${installed.message}") }
+            }
+        }
     }
 
     // Mantido para compatibilidade com qualquer chamada antiga.
     fun roll() = action {
         val reward = expansionRepository.rollGacha(uiState.value.companyLevel)
-        extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
+        val suffix = if (reward.type == "machine" && reward.id != null) {
+            " • " + premiumMachineInstaller.install(reward.id).message
+        } else ""
+        extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}$suffix") }
     }
 
     fun dismissCompletedContract(id: String) = action {
@@ -110,7 +139,7 @@ class ExpansionViewModel @Inject constructor(
     fun publishCharacter() = action {
         val state = uiState.value.expansion
         val name = FirebaseAuth.getInstance().currentUser?.displayName ?: "Mestre da Usinagem"
-        rentalService.publishMyCharacter(name, state.playerSkills, state.playerRentalBoostPct())
+        rentalService.publishMyCharacter(name, state.playerSkills, state.playerRentalBoostPct(), state.playerXp)
         extras.update { it.copy(message = "Personagem publicado para contratos de 48h") }
     }
 

@@ -1,4 +1,6 @@
 package br.com.usinagemmaster.feature.machines
+import br.com.usinagemmaster.domain.expansion.ExpansionCatalog
+import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 
 import br.com.usinagemmaster.feature.expansion.ExpansionLauncherCard
 
@@ -229,17 +231,34 @@ fun MachinesScreen(
             }
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
-                FactoryHud(
-                    dashboard = dashboard,
-                    boostTokens = engagement.boostTokens
-                )
-                FactoryExperienceTitle(
-                    active = production.operatingMachines,
-                    waiting = production.idleMachines
-                )
+            if (mode == WarehouseMode.LAYOUT) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 6.dp
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp)) {
+                        WarehouseTabs(mode = mode, onMode = { mode = it })
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("✥ MODO EDIÇÃO • arraste as máquinas", fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+                            Text("${machines.size}/30", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            "O painel superior foi recolhido para liberar a tela. Arraste uma máquina para outra célula e toque nela para gerenciar.",
+                            Modifier.padding(horizontal = 18.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                FactoryHud(dashboard = dashboard, boostTokens = engagement.boostTokens)
+                FactoryExperienceTitle(active = production.operatingMachines, waiting = production.idleMachines)
                 WarehouseTabs(mode = mode, onMode = { mode = it })
-                // EXPANSION_LAUNCHER_V2
-                ExpansionLauncherCard(onOpen = { expansionHubVisible.value = true })
                 FactoryStatusRow(
                     active = production.operatingMachines,
                     waiting = production.idleMachines,
@@ -247,8 +266,9 @@ fun MachinesScreen(
                     logistics = logistics,
                     inspection = inspection
                 )
+            }
 
-                when {
+            when {
                     machines.isEmpty() -> {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             Text("Nenhuma máquina instalada.")
@@ -347,6 +367,13 @@ fun MachinesScreen(
             dismissButton = { TextButton(onClick = { showSnackConfirm = false }) { Text("Cancelar") } }
         )
     }
+}
+
+private fun machineDisplayNameV5(machine: MachineEntity): String {
+    val premiumId = PremiumMachineInstaller.premiumId(machine.id)
+    return premiumId?.let { id -> ExpansionCatalog.premiumMachines.firstOrNull { it.id == id }?.name }
+        ?: MachineCatalog.byType(machine.machineType)?.name
+        ?: machine.machineType
 }
 
 @Composable
@@ -492,7 +519,7 @@ private fun FactoryMachineQuickCard(
     onManage: () -> Unit,
     onClear: () -> Unit
 ) {
-    val title = MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType
+    val title = machineDisplayNameV5(machine)
     val operating = production?.isOperating == true
     val statusColor = if (operating) Color(0xFF61E3A0) else Color(0xFFE9B84C)
     Surface(
@@ -1010,8 +1037,9 @@ private fun WarehouseLayout(
                 ) {
                     Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Icon(Icons.Default.PrecisionManufacturing, null, Modifier.size(18.dp), tint = if (operating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
-                        Text(def?.name ?: machine.machineType, maxLines = 1, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Text(machineDisplayNameV5(machine), maxLines = 1, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Text(operator?.name?.substringBefore(' ') ?: "Sem operador", maxLines = 1, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    if (PremiumMachineInstaller.premiumId(machine.id) != null) Text("PREMIUM • Nível ${machine.level}", maxLines = 1, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
                         Text(if (operating) "${String.format(Locale.getDefault(), "%.1f", work?.unitsPer10Minutes ?: 0.0)} pç/10 min" else "PARADA", style = MaterialTheme.typography.labelSmall)
                     }
                 }

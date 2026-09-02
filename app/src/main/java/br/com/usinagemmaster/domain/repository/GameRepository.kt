@@ -43,4 +43,7 @@ interface GameRepository {
     suspend fun upgradeWarehouse(): Result<Unit>
     suspend fun claimGoal(goal: GoalEntity): Result<Unit>
     suspend fun claimLegendaryMission(mission: LegendaryMissionEntity): Result<Unit>
+
+suspend fun cancelContract(contractId: String): Result<Long>
+    suspend fun dismissFailedContract(contractId: String): Result<Unit>
 }
