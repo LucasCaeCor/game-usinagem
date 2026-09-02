@@ -13,6 +13,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import br.com.usinagemmaster.core.designsystem.component.IndustrialBackground
 import br.com.usinagemmaster.core.util.Formatters
 import java.util.Locale
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun SplashScreen(vm: SplashViewModel = hiltViewModel(), onContinue: () -> Unit) {
@@ -22,7 +23,7 @@ fun SplashScreen(vm: SplashViewModel = hiltViewModel(), onContinue: () -> Unit) 
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                 Icon(Icons.Default.PrecisionManufacturing, null, Modifier.size(86.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(16.dp))
-                Text("USINAGEM MASTER", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Text("USINAGEM MASTER", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
                 Text("Império do Aço", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(36.dp))
                 if (state.loading) {

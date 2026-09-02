@@ -23,9 +23,7 @@ import br.com.usinagemmaster.data.social.CommunityFactory
 
 @Composable
 fun CommunityFactoryButton(vm: CommunityFactoryViewModel = hiltViewModel()) {
-    var open by remember { mutableStateOf(false) }
-
-    ElevatedCard(
+ElevatedCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF18262D)),
     ) {
@@ -37,15 +35,28 @@ fun CommunityFactoryButton(vm: CommunityFactoryViewModel = hiltViewModel()) {
                 style = MaterialTheme.typography.bodySmall,
             )
             Button(
-                onClick = { open = true; vm.refresh() },
+                onClick = { vm.openBrowser(); vm.refresh() },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("VISITAR OUTRAS FÁBRICAS")
             }
         }
     }
+}
 
-    if (open) CommunityFactoriesDialog(onDismiss = { open = false }, vm = vm)
+
+@Composable
+fun CommunityFactoryStableHost(
+    vm: CommunityFactoryViewModel = hiltViewModel(),
+) {
+    // V13_COMMUNITY_STABLE_HOST
+    val state by vm.state.collectAsStateWithLifecycle()
+    if (state.browserOpen) {
+        CommunityFactoriesDialog(
+            onDismiss = vm::closeBrowser,
+            vm = vm,
+        )
+    }
 }
 
 @Composable
@@ -56,7 +67,7 @@ private fun CommunityFactoriesDialog(
     val state by vm.state.collectAsStateWithLifecycle()
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize()) {

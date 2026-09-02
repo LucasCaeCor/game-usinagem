@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import br.com.usinagemmaster.core.designsystem.component.IndustrialBackground
 import br.com.usinagemmaster.core.designsystem.component.ScreenHeader
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
@@ -45,7 +46,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                     shape = RoundedCornerShape(20.dp)
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                        Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(4.dp))
                         Text("Império do Aço", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text("Versão 0.8.0 • Fábrica Premium + ganhos 3x", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

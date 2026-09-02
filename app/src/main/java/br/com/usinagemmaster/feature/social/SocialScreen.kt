@@ -21,6 +21,7 @@ import br.com.usinagemmaster.domain.social.OnlinePlayer
 import br.com.usinagemmaster.domain.social.SocialHelpGift
 import kotlinx.coroutines.delay
 import java.util.Locale
+import br.com.usinagemmaster.feature.community.CommunityFactoryStableHost
 
 @Composable
 fun SocialScreen(
@@ -49,6 +50,9 @@ fun SocialScreen(
             contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 34.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+        // V13_COMMUNITY_PERSISTENT_LAUNCHER
+        item { CommunityFactoryButton() }
+
             item {
                 Text("COMUNIDADE", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
                 Text("Donos de oficina", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
@@ -113,6 +117,9 @@ fun SocialScreen(
             }
         }
     }
+
+    // V13_COMMUNITY_STABLE_HOST_CALL
+    CommunityFactoryStableHost()
 }
 
 @Composable
@@ -160,7 +167,7 @@ private fun PlayerCard(player: OnlinePlayer, onHelp: () -> Unit) {
                     Spacer(Modifier.width(6.dp))
                     Text("●", color = if (online) Color(0xFF61DEA0) else Color(0xFF718088), style = MaterialTheme.typography.labelSmall)
                 }
-                Text(player.companyName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(player.companyName, style = MaterialTheme.typography.bodySmall, color = Color.White)
                 Text("Nv. ${player.companyLevel} • Rep. ${player.reputation} • ${player.machineCount} máquinas", style = MaterialTheme.typography.labelSmall)
                 Text(String.format(Locale.getDefault(), "%.1f pç / 10 min", player.productionPer10Minutes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }

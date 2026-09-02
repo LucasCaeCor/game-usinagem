@@ -22,6 +22,7 @@ import br.com.usinagemmaster.feature.expansion.GoogleAuthBridge
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun AccountRootOverlay(content: @Composable () -> Unit) {
@@ -170,7 +171,7 @@ private fun StartupAccountDialog(
                     Text("⚙", Modifier.padding(22.dp), style = MaterialTheme.typography.displaySmall)
                 }
                 Spacer(Modifier.height(18.dp))
-                Text("Usinagem Master", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Text("Usinagem Master", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     if (user == null) "Conecte uma conta Google real. Se o jogo já criou uma UID temporária, ela será vinculada ao Google sem apagar seu progresso."

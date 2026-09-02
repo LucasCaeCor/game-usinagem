@@ -93,7 +93,7 @@ fun GameCard(
                 }
             }
             Spacer(Modifier.height(7.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Color.White)
             if (subtitle != null) {
                 Spacer(Modifier.height(3.dp))
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

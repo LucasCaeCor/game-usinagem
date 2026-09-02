@@ -101,7 +101,7 @@ fun MainMenuScreen(onContinue: () -> Unit, onSettings: () -> Unit, onProfile: ()
             }
 
             Spacer(Modifier.height(24.dp))
-            Text("USINAGEM MASTER", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("USINAGEM MASTER", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
             Text("IMPÉRIO DO AÇO", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(8.dp))
             Text("Transforme uma oficina antiga em uma indústria CNC viva.", color = MaterialTheme.colorScheme.onSurfaceVariant)

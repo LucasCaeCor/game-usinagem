@@ -35,14 +35,16 @@ import br.com.usinagemmaster.domain.simulation.SimulationCadence
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.sin
+import br.com.usinagemmaster.feature.expansion.ExpansionHomeMenu
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private data class DashboardAction(val title: String, val subtitle: String, val route: String, val icon: ImageVector)
 
 @Composable
 fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (String) -> Unit) {
-    val state by vm.state.collectAsState()
-    val production by vm.production.collectAsState()
-    val playerProfile by vm.playerProfile.collectAsState()
+    val state by vm.state.collectAsStateWithLifecycle()
+    val production by vm.production.collectAsStateWithLifecycle()
+    val playerProfile by vm.playerProfile.collectAsStateWithLifecycle()
 
     
     // V10_RENAME_DIALOG_STATE
@@ -50,11 +52,12 @@ fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (Strin
 LaunchedEffect(Unit) {
         while (true) {
             vm.tickProduction()
-            delay(5_000L)
+            delay(10_000L)
         }
     }
 
-    val actions = listOf(
+    // V13_REMEMBER_ACTIONS
+    val actions = remember { listOf(
         DashboardAction("Fábrica viva", "Veja máquinas, operadores e pausas", "machines", Icons.Default.Factory),
         DashboardAction("Funcionários", "Equipe, lendários e missões", "employees", Icons.Default.Groups),
         DashboardAction("Contratos", "Produção, qualidade e prazos", "contracts", Icons.Default.Assignment),
@@ -65,7 +68,7 @@ LaunchedEffect(Unit) {
         DashboardAction("Meu personagem", "Crie o dono da sua fábrica", "profile", Icons.Default.Person),
         DashboardAction("Comunidade", "Ranking e apoio entre oficinas", "social", Icons.Default.Public),
         DashboardAction("Configurações", "Som, falas e preferências", "settings", Icons.Default.Settings)
-    )
+    ) }
 
     IndustrialBackground {
         LazyVerticalGrid(
@@ -77,7 +80,7 @@ LaunchedEffect(Unit) {
         ) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
                 Column {
-                    Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                    Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.ExtraBold)
                     Row(
                 // V10_COMPANY_NAME_EDITOR_TRIGGER
                 modifier = Modifier.fillMaxWidth(),
@@ -139,12 +142,17 @@ LaunchedEffect(Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Gestão da fábrica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                    Text("Gestão da fábrica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
                     StatusPill(if (production.operatingMachines > 0) "TURNO ATIVO" else "SEM PRODUÇÃO", production.operatingMachines > 0)
                 }
             }
 
-            items(actions) { action ->
+            // V12_HOME_ADVANCED_MENU
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+            ExpansionHomeMenu()
+        }
+
+        items(actions) { action ->
                 Card(
                     onClick = { onNavigate(action.route) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -159,7 +167,7 @@ LaunchedEffect(Unit) {
                             Icon(action.icon, null, Modifier.padding(8.dp).size(21.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                         Spacer(Modifier.height(10.dp))
-                        Text(action.title, fontWeight = FontWeight.ExtraBold)
+                        Text(action.title, fontWeight = FontWeight.ExtraBold, color = Color.White)
                         Text(action.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -279,13 +287,8 @@ private fun LiveCompanyHeader(
     operating: Int,
     idle: Int
 ) {
-    val infinite = rememberInfiniteTransition(label = "dashboard_header")
-    val phase by infinite.animateFloat(
-        0f,
-        1f,
-        infiniteRepeatable(tween(4200, easing = LinearEasing), RepeatMode.Restart),
-        label = "header_phase"
-    )
+    // V13_STATIC_HEADER — sem animação infinita na Home
+    val phase = 0.52f
     Box(
         Modifier
             .fillMaxWidth()
@@ -310,14 +313,14 @@ private fun LiveCompanyHeader(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("CAIXA DISPONÍVEL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(cash, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                    Text(cash, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
                 }
                 StatusPill("NÍVEL $companyLevel")
             }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("★ Reputação $reputation", style = MaterialTheme.typography.bodySmall)
-                Text("Galpão $space", style = MaterialTheme.typography.bodySmall)
+                Text("★ Reputação $reputation", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                Text("Galpão $space", style = MaterialTheme.typography.bodySmall, color = Color.White)
             }
         // V7_FACTORY_XP_DASHBOARD
         val factoryXp = br.com.usinagemmaster.domain.expansion.ExpansionProgression.factory(companyLevel, reputation)

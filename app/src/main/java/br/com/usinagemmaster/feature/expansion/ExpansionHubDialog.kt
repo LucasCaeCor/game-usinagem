@@ -43,7 +43,7 @@ import kotlin.random.Random
 
 private enum class ExpansionTab(val label: String) {
     GACHA("Roleta"), COMPANY("Empresa"), SKILLS("Skills"), TOOLS("Ferramentas"),
-    CHARACTER("Personagens"), CONTRACTS("Concluídos"), ACCOUNT("Conta")
+    CHARACTER("Personagens"), MARKET("Mercado"), CONTRACTS("Concluídos"), ACCOUNT("Conta")
 }
 
 private data class WheelSector(val type: String, val label: String, val symbol: String)
@@ -68,26 +68,47 @@ private val wheelSectors = listOf(
 @Composable
 fun ExpansionHubDialog(
     onDismiss: () -> Unit,
+    initialSection: String = "gacha",
+    showSectionNavigation: Boolean = false,
     viewModel: ExpansionViewModel = hiltViewModel(),
 ) {
+    // V12_FOCUSED_SECTION
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
-            ExpansionHubContent(state, viewModel, onDismiss)
+            ExpansionHubContent(state, viewModel, onDismiss, initialSection, showSectionNavigation)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ExpansionHubContent(state: ExpansionUiState, vm: ExpansionViewModel, onDismiss: () -> Unit) {
-    var tab by rememberSaveable { mutableStateOf(ExpansionTab.GACHA) }
+private fun ExpansionHubContent(
+    state: ExpansionUiState,
+    vm: ExpansionViewModel,
+    onDismiss: () -> Unit,
+    initialSection: String,
+    showSectionNavigation: Boolean,
+) {
+    val initialTab = remember(initialSection) {
+        when (initialSection.lowercase()) {
+            "company", "empresa" -> ExpansionTab.COMPANY
+            "skills", "research", "pesquisa" -> ExpansionTab.SKILLS
+            "tools", "ferramentas" -> ExpansionTab.TOOLS
+            "character", "characters", "personagens" -> ExpansionTab.CHARACTER
+            "market", "mercado" -> ExpansionTab.MARKET
+            "contracts", "history", "historico", "histórico" -> ExpansionTab.CONTRACTS
+            "account", "conta" -> ExpansionTab.ACCOUNT
+            else -> ExpansionTab.GACHA
+        }
+    }
+    var tab by rememberSaveable(initialSection) { mutableStateOf(initialTab) }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Centro de Evolução", fontWeight = FontWeight.Bold)
+                        Text("${tab.label}", fontWeight = FontWeight.Bold, color = Color.White)
                         Text("Nível ${state.companyLevel}", style = MaterialTheme.typography.labelMedium)
                     }
                 },
@@ -96,19 +117,24 @@ private fun ExpansionHubContent(state: ExpansionUiState, vm: ExpansionViewModel,
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            // V3: login nunca mais fica escondido dentro de uma aba.
-            GoogleLoginBanner(state, vm)
+            // V12: login não ocupa a Roleta. Só aparece em áreas online/conta.
+            if (tab == ExpansionTab.MARKET || tab == ExpansionTab.ACCOUNT) {
+                GoogleLoginBanner(state, vm)
+            }
 
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ExpansionTab.entries.forEach { item ->
-                    val label = if (item == ExpansionTab.CONTRACTS && state.completedContracts.isNotEmpty()) {
-                        "Concluídos (${state.completedContracts.size})"
-                    } else item.label
-                    FilterChip(selected = tab == item, onClick = { tab = item }, label = { Text(label) })
-                }
+            // V12_OPTIONAL_SECTION_NAV
+            if (showSectionNavigation) {
+                Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ExpansionTab.entries.forEach { item ->
+                                    val label = if (item == ExpansionTab.CONTRACTS && state.completedContracts.isNotEmpty()) {
+                                        "Concluídos (${state.completedContracts.size})"
+                                    } else item.label
+                                    FilterChip(selected = tab == item, onClick = { tab = item }, label = { Text(label) })
+                                }
+                            }
             }
 
             state.message?.let {
@@ -124,6 +150,7 @@ private fun ExpansionHubContent(state: ExpansionUiState, vm: ExpansionViewModel,
                 ExpansionTab.SKILLS -> SkillsTab(state, vm)
                 ExpansionTab.TOOLS -> ToolsTab(state, vm)
                 ExpansionTab.CHARACTER -> CharacterTab(state, vm)
+                ExpansionTab.MARKET -> MarketTab(state, vm)
                 ExpansionTab.CONTRACTS -> CompletedContractsTab(state, vm)
                 ExpansionTab.ACCOUNT -> AccountTab(state, vm)
             }
@@ -703,43 +730,11 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 
         item {
             HorizontalDivider()
-            Text("🌐 Mercado conectado • 48h", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             Text(
-                "Aqui você NÃO contrata os personagens premium da loja. Você contrata o personagem principal de OUTRO JOGADOR por 48h, usando as skills e o nível dele como benefício temporário.",
+                "Mercado entre jogadores foi movido para a Home.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
             )
-
-            val hired = state.expansion.remoteHireName
-            if (hired != null && state.expansion.remoteHireEndsAt > System.currentTimeMillis()) {
-                Text(
-                    "Na sua empresa: $hired • +${state.expansion.remoteHireBoostPct}% até ${dateTime(state.expansion.remoteHireEndsAt)}",
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = vm::publishCharacter,
-                    enabled = state.accountEmail != null && !state.busy,
-                ) { Text("Ofertar meu personagem") }
-
-                OutlinedButton(
-                    onClick = vm::loadOffers,
-                    enabled = state.accountEmail != null && !state.busy,
-                ) { Text("Buscar jogadores") }
-            }
-
-            if (state.accountEmail == null) {
-                Text(
-                    "Conecte uma conta Google no Perfil para usar o mercado entre jogadores.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-
-        items(state.offers, key = { it.ownerUid }) { offer ->
-            RentalOfferCard(offer, state, vm)
         }
     }
 }
@@ -752,6 +747,105 @@ private fun RentalOfferCard(offer: CharacterOffer, state: ExpansionUiState, vm: 
         Text("Skills: ${if (offer.skills.isEmpty()) "iniciante" else offer.skills.joinToString()}", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { vm.hire(offer) }, enabled = !state.busy) { Text("Contratar por 2 dias") }
     } }
+}
+
+
+@Composable
+private fun MarketTab(state: ExpansionUiState, vm: ExpansionViewModel) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text(
+                "🌐 Mercado de Profissionais",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+            )
+            Text(
+                "Ofereça seu personagem principal ou contrate o personagem de outro jogador por 48 horas. Personagens premium da loja não entram neste mercado.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Meu profissional", fontWeight = FontWeight.Black, color = Color.White)
+                    Text(
+                        "Ao ofertar, outros jogadores verão o nível e as skills do seu personagem. O vínculo dura 48h.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Button(
+                        onClick = vm::publishCharacter,
+                        enabled = state.accountEmail != null && !state.busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("OFERTAR MEU PERSONAGEM")
+                    }
+
+                    OutlinedButton(
+                        onClick = vm::loadOffers,
+                        enabled = state.accountEmail != null && !state.busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("BUSCAR PROFISSIONAIS")
+                    }
+
+                    if (state.accountEmail == null) {
+                        Text(
+                            "Conecte sua conta Google no Perfil/Conta para usar o mercado online.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+
+        state.expansion.remoteHireName?.let { hired ->
+            if (state.expansion.remoteHireEndsAt > System.currentTimeMillis()) {
+                item {
+                    ElevatedCard(
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                            Text("✓ Profissional contratado", fontWeight = FontWeight.Black, color = Color.White)
+                            Text(
+                                "$hired • +${state.expansion.remoteHireBoostPct}% até ${dateTime(state.expansion.remoteHireEndsAt)}",
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.offers.isEmpty()) {
+            item {
+                Text(
+                    "Use “Buscar profissionais” para carregar jogadores disponíveis.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        items(state.offers, key = { it.ownerUid }) { offer ->
+            RentalOfferCard(offer, state, vm)
+        }
+    }
 }
 
 @Composable
@@ -796,9 +890,9 @@ fun ExpansionLauncherCard(onOpen: () -> Unit) {
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("🎰 CENTRO DE EVOLUÇÃO", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text("Roleta com figuras • Personagens • Skins • Máquinas TOP • Ferramentas • Skills • Conta Google", style = MaterialTheme.typography.bodySmall)
-            FilledTonalButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("ABRIR ROLETA E EVOLUÇÃO") }
+            Text("🎰 ROLETA INDUSTRIAL", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+            Text("Gire fichas para obter ferramentas, skins, máquinas TOP e personagens não repetidos.", style = MaterialTheme.typography.bodySmall)
+            FilledTonalButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("ABRIR ROLETA") }
         }
     }
 }

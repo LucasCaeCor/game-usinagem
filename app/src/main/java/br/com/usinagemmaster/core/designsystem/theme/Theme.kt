@@ -31,17 +31,19 @@ val ElectricBlue = Color(0xFF5CC8FF)
 val PlasmaCyan = Color(0xFF76E4FF)
 
 private val IndustrialColors = darkColorScheme(
+        // V12_DARK_CONTRAST — foregrounds claros em superfícies escuras
+        onTertiaryContainer = Color.White,
         // V10_DARK_CONTRAST: conteúdo legível em superfícies escuras
     primary = IndustrialAmber,
-    onPrimary = Color(0xFF251800),
+    onPrimary = Color.White,
     primaryContainer = Color(0xFF493400),
-    onPrimaryContainer = Color(0xFFFFE0A1),
+    onPrimaryContainer = Color.White,
     secondary = Steel400,
-    onSecondary = Steel950,
+    onSecondary = Color.White,
     secondaryContainer = Steel800,
-    onSecondaryContainer = Steel100,
+    onSecondaryContainer = Color.White,
     tertiary = ElectricBlue,
-    onTertiary = Color(0xFF001F2C),
+    onTertiary = Color.White,
     background = Steel980,
     surface = Steel900,
     surfaceVariant = Steel800,
@@ -52,7 +54,7 @@ private val IndustrialColors = darkColorScheme(
     outlineVariant = Color(0xFF26343C),
     onBackground = Color.White,
     onSurface = Color.White,
-    onSurfaceVariant = Color(0xFFD2D9DD),
+    onSurfaceVariant = Color(0xFFD7DEE3),
     error = DangerRed
 )
 

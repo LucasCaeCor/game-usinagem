@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private enum class WarehouseMode { LIVE, LAYOUT, LIST }
 
@@ -66,7 +67,7 @@ fun MachinesScreen(
 ) {
     // V11_WORK_LIFE_UI
     val workLifeVm: WorkLifeViewModel = hiltViewModel()
-    val workLife by workLifeVm.state.collectAsState()
+    val workLife by workLifeVm.state.collectAsStateWithLifecycle()
 
     // EXPANSION_HUB_INJECTED
     val expansionHubVisible = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -74,15 +75,15 @@ fun MachinesScreen(
     if (expansionHubVisible.value) {
         ExpansionHubDialog(onDismiss = { expansionHubVisible.value = false })
     }
-    val machines by vm.machines.collectAsState()
-    val employees by vm.employees.collectAsState()
-    val production by vm.production.collectAsState()
-    val dashboard by vm.dashboard.collectAsState()
-    val settings by vm.settings.collectAsState()
-    val engagement by vm.engagement.collectAsState()
-    val workforce by vm.workforce.collectAsState()
-    val playerProfile by vm.playerProfile.collectAsState()
-    val message by vm.message.collectAsState()
+    val machines by vm.machines.collectAsStateWithLifecycle()
+    val employees by vm.employees.collectAsStateWithLifecycle()
+    val production by vm.production.collectAsStateWithLifecycle()
+    val dashboard by vm.dashboard.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val engagement by vm.engagement.collectAsStateWithLifecycle()
+    val workforce by vm.workforce.collectAsStateWithLifecycle()
+    val playerProfile by vm.playerProfile.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
     var mode by remember { mutableStateOf(WarehouseMode.LIVE) }
     var selectedId by remember { mutableStateOf<String?>(null) }
@@ -102,18 +103,22 @@ fun MachinesScreen(
 
     // Mantém o fechamento de 10 min vivo enquanto a fábrica está aberta.
     LaunchedEffect(Unit) {
-        var seconds = 0
+        // V13_FACTORY_CLOCK
+        // Antes esta tela inteira era invalidada a cada 1s.
+        var elapsed = 0
         while (true) {
             now = System.currentTimeMillis()
-            if (seconds % 5 == 0) vm.tickProduction()
-            seconds++
-            delay(1_000L)
+            if (elapsed % 10 == 0) vm.tickProduction()
+            elapsed += 2
+            delay(2_000L)
         }
     }
 
     val selectedMachine = machines.firstOrNull { it.id == manageId }
     val focusedMachine = machines.firstOrNull { it.id == selectedId }
-    val operatingIds = production.machineProduction.filter { it.isOperating }.map { it.machineId }.toSet()
+    val operatingIds = remember(production.machineProduction) {
+        production.machineProduction.filter { it.isOperating }.map { it.machineId }.toSet()
+    }
     val phoneIdleId = workforce.activeIdleEmployeeId(now)
     val idleEmployees = employees.filter { employee ->
         val assigned = employee.assignedMachineId
