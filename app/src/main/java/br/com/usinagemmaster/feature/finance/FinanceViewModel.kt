@@ -11,5 +11,5 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FinanceViewModel @Inject constructor(repo: GameRepository): ViewModel() {
-    val transactions = repo.finances().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<FinancialTransactionEntity>())
+    val transactions = repo.finances().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<FinancialTransactionEntity>())
 }

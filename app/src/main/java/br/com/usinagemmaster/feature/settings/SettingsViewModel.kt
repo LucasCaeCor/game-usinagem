@@ -11,7 +11,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(private val prefs: GamePreferences): ViewModel() {
-    val settings = prefs.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), br.com.usinagemmaster.data.preferences.GameSettings())
+    val settings = prefs.settings.stateIn(viewModelScope, SharingStarted.Eagerly, br.com.usinagemmaster.data.preferences.GameSettings())
     fun sound(value:Boolean)=viewModelScope.launch{prefs.setSound(value)}
     fun vibration(value:Boolean)=viewModelScope.launch{prefs.setVibration(value)}
     fun npcSpeech(value:Boolean)=viewModelScope.launch{prefs.setNpcSpeech(value)}

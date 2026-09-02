@@ -44,7 +44,10 @@ fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (Strin
     val production by vm.production.collectAsState()
     val playerProfile by vm.playerProfile.collectAsState()
 
-    LaunchedEffect(Unit) {
+    
+    // V10_RENAME_DIALOG_STATE
+    var showRenameCompany by remember { mutableStateOf(false) }
+LaunchedEffect(Unit) {
         while (true) {
             vm.tickProduction()
             delay(5_000L)
@@ -75,7 +78,26 @@ fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (Strin
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
                 Column {
                     Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                    Text(state.companyName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                    Row(
+                // V10_COMPANY_NAME_EDITOR_TRIGGER
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    state.companyName,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                IconButton(onClick = { showRenameCompany = true }) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Renomear empresa",
+                        tint = Color.White
+                    )
+                }
+            }
                     Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         AssistChip(
@@ -144,6 +166,72 @@ fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (Strin
             }
         }
     }
+
+    // V10_COMPANY_RENAME_DIALOG
+    if (showRenameCompany) {
+        var draftCompanyName by remember(state.companyName, showRenameCompany) {
+            mutableStateOf(state.companyName)
+        }
+        val normalizedCompanyName = draftCompanyName.trim().replace(Regex("\\s+"), " ")
+        val validCompanyName = normalizedCompanyName.length in 3..32 &&
+            normalizedCompanyName.any { it.isLetterOrDigit() }
+
+        AlertDialog(
+            onDismissRequest = { showRenameCompany = false },
+            title = {
+                Text(
+                    "Nome da empresa",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Esse nome identifica sua fábrica no jogo e na comunidade.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = draftCompanyName,
+                        onValueChange = { if (it.length <= 32) draftCompanyName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Nome da fábrica") },
+                        singleLine = true,
+                        supportingText = {
+                            Text(
+                                "${normalizedCompanyName.length}/32 caracteres",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    )
+                    if (draftCompanyName.isNotBlank() && !validCompanyName) {
+                        Text(
+                            "Use entre 3 e 32 caracteres.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = validCompanyName && normalizedCompanyName != state.companyName,
+                    onClick = {
+                        vm.renameCompany(normalizedCompanyName)
+                        showRenameCompany = false
+                    }
+                ) {
+                    Text("Salvar nome")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameCompany = false }) {
+                    Text("Cancelar", color = Color.White)
+                }
+            }
+        )
+    }
+
 }
 
 @Composable
@@ -172,11 +260,11 @@ private fun SettlementCountdownCard(lastSimulationAt: Long, nextProfitCents: Lon
         ) {
             Column {
                 Text("PRÓXIMO FECHAMENTO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                Text(String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text("estimativa", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("+${Formatters.money(nextProfitCents)}", fontWeight = FontWeight.ExtraBold)
+                Text("+${Formatters.money(nextProfitCents)}", fontWeight = FontWeight.ExtraBold, color = Color.White)
             }
         }
     }

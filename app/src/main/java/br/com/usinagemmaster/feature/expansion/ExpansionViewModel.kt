@@ -1,11 +1,11 @@
 package br.com.usinagemmaster.feature.expansion
-import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import br.com.usinagemmaster.data.local.dao.ContractDao
 import br.com.usinagemmaster.data.local.entity.ContractEntity
 import br.com.usinagemmaster.data.preferences.ExpansionRepository
+import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 import br.com.usinagemmaster.data.social.CharacterOffer
 import br.com.usinagemmaster.data.social.CharacterRentalService
 import br.com.usinagemmaster.domain.expansion.*
@@ -57,22 +57,20 @@ class ExpansionViewModel @Inject constructor(
             activeContracts = contracts.filter { it.status == ContractStatus.ACTIVE.name },
             completedContracts = completed,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExpansionUiState())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ExpansionUiState())
 
     init {
         refreshAccount()
         viewModelScope.launch { expansionRepository.clearExpiredRemoteHire() }
-        viewModelScope.launch { premiumMachineInstaller.syncOwned(expansionRepository.snapshot().premiumMachines) }
-    
-        // V7_PLAYER_XP_BASELINE
         viewModelScope.launch {
             val dashboard = gameRepository.dashboard().first()
             expansionRepository.ensurePlayerXpBaseline(dashboard.companyLevel)
         }
+        viewModelScope.launch { claimRentalExperience(showMessage = false) }
     }
 
     fun refreshAccount(message: String? = null) {
-        val user = GoogleAuthBridge.currentGoogleUser()
+        val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
         extras.update { it.copy(accountName = user?.displayName, accountEmail = user?.email, message = message) }
     }
 
@@ -92,7 +90,6 @@ class ExpansionViewModel @Inject constructor(
         val installed = premiumMachineInstaller.install(id)
         extras.update { it.copy(message = installed.message) }
     }
-
     fun bindTool(contractId: String, toolId: String?) = action { expansionRepository.bindTool(contractId, toolId) }
 
     fun claimDailyTicket() = action {
@@ -100,7 +97,6 @@ class ExpansionViewModel @Inject constructor(
         extras.update { it.copy(message = "Ficha diária coletada. Total: $total") }
     }
 
-    /** Sorteia/aplica o prêmio sem revelar antes da animação terminar. */
     suspend fun drawWheelReward(): GachaReward {
         check(!extras.value.busy) { "Aguarde a operação atual" }
         extras.update { it.copy(busy = true, message = null, lastReward = null) }
@@ -111,24 +107,13 @@ class ExpansionViewModel @Inject constructor(
         }
     }
 
-    /** Revela exatamente o prêmio que já determinou o setor vencedor da roda. */
     fun revealWheelReward(reward: GachaReward) {
         extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
-        if (reward.type == "machine" && reward.id != null) {
-            viewModelScope.launch {
-                val installed = premiumMachineInstaller.install(reward.id)
-                extras.update { it.copy(message = "${reward.rarity.label}: ${reward.title} • ${installed.message}") }
-            }
-        }
     }
 
-    // Mantido para compatibilidade com qualquer chamada antiga.
     fun roll() = action {
         val reward = expansionRepository.rollGacha(uiState.value.companyLevel)
-        val suffix = if (reward.type == "machine" && reward.id != null) {
-            " • " + premiumMachineInstaller.install(reward.id).message
-        } else ""
-        extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}$suffix") }
+        extras.update { it.copy(lastReward = reward, message = "${reward.rarity.label}: ${reward.title}") }
     }
 
     fun dismissCompletedContract(id: String) = action {
@@ -137,6 +122,7 @@ class ExpansionViewModel @Inject constructor(
     }
 
     fun publishCharacter() = action {
+        claimRentalExperience(showMessage = false)
         val state = uiState.value.expansion
         val name = FirebaseAuth.getInstance().currentUser?.displayName ?: "Mestre da Usinagem"
         rentalService.publishMyCharacter(name, state.playerSkills, state.playerRentalBoostPct(), state.playerXp)
@@ -144,8 +130,25 @@ class ExpansionViewModel @Inject constructor(
     }
 
     fun loadOffers() = action {
+        val gained = claimRentalExperience(showMessage = false)
         val offers = rentalService.offers()
-        extras.update { it.copy(offers = offers, message = if (offers.isEmpty()) "Nenhuma oferta livre agora" else null) }
+        extras.update {
+            it.copy(
+                offers = offers,
+                message = when {
+                    gained > 0L -> "+$gained XP de experiência externa coletados"
+                    offers.isEmpty() -> "Nenhuma oferta livre agora"
+                    else -> null
+                },
+            )
+        }
+    }
+
+    fun collectRentalXp() = action {
+        val gained = claimRentalExperience(showMessage = false)
+        extras.update {
+            it.copy(message = if (gained > 0L) "+$gained XP do personagem por trabalhos em outras fábricas" else "Nenhum aluguel concluído com XP pendente")
+        }
     }
 
     fun hire(offer: CharacterOffer) = action {
@@ -160,6 +163,19 @@ class ExpansionViewModel @Inject constructor(
     }
 
     fun clearMessage() = extras.update { it.copy(message = null) }
+
+    private suspend fun claimRentalExperience(showMessage: Boolean): Long {
+        val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
+        if (user?.email.isNullOrBlank()) return 0L
+        return runCatching {
+            var total = 0L
+            rentalService.completedRentalXpForOwner().forEach { reward ->
+                if (expansionRepository.claimRentalXpReward(reward.rentalId, reward.xp)) total += reward.xp
+            }
+            if (showMessage && total > 0L) extras.update { it.copy(message = "+$total XP de experiência externa") }
+            total
+        }.getOrDefault(0L)
+    }
 
     private fun action(block: suspend () -> Unit) {
         if (extras.value.busy) return

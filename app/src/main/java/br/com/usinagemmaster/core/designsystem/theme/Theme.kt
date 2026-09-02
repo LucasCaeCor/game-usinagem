@@ -31,6 +31,7 @@ val ElectricBlue = Color(0xFF5CC8FF)
 val PlasmaCyan = Color(0xFF76E4FF)
 
 private val IndustrialColors = darkColorScheme(
+        // V10_DARK_CONTRAST: conteúdo legível em superfícies escuras
     primary = IndustrialAmber,
     onPrimary = Color(0xFF251800),
     primaryContainer = Color(0xFF493400),
@@ -49,9 +50,9 @@ private val IndustrialColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF26343C),
     outline = Steel700,
     outlineVariant = Color(0xFF26343C),
-    onBackground = Steel100,
-    onSurface = Steel100,
-    onSurfaceVariant = Color(0xFFC0CDD2),
+    onBackground = Color.White,
+    onSurface = Color.White,
+    onSurfaceVariant = Color(0xFFD2D9DD),
     error = DangerRed
 )
 

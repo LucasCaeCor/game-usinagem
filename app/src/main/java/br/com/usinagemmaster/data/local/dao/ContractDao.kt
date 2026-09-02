@@ -133,4 +133,8 @@ interface ContractDao {
     /** FAILED é só histórico; apagar não devolve multa/reputação. */
     @Query("DELETE FROM contracts WHERE id = :contractId AND status = 'FAILED'")
     suspend fun dismissFailed(contractId: String)
+
+    // V8 • estoque elegível por nível; evita ficar sem contratos executáveis.
+    @Query("SELECT * FROM contracts WHERE status = 'AVAILABLE' ORDER BY generatedAt DESC")
+    suspend fun getAvailableForProgression(): List<ContractEntity>
 }

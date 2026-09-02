@@ -1,4 +1,6 @@
 package br.com.usinagemmaster.app.navigation
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -48,7 +50,13 @@ object Routes {
 
 @Composable
 fun AppNavigation(nav: NavHostController = rememberNavController()) {
-    NavHost(navController = nav, startDestination = Routes.SPLASH) {
+    NavHost(navController = nav, startDestination = Routes.SPLASH,
+        // V8_FAST_NAV • remove a animação padrão longa do Navigation Compose.
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None },
+    ) {
         composable(Routes.SPLASH) {
             SplashScreen {
                 nav.navigate(Routes.MENU) {

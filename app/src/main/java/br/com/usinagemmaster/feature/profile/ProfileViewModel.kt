@@ -22,9 +22,9 @@ class ProfileViewModel @Inject constructor(
     private val social: SocialRepository,
     private val game: GameRepository
 ) : ViewModel() {
-    val profile = preferences.profile.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalPlayerProfile())
-    private val dashboard = game.dashboard().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardStatus())
-    private val production = game.production().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProductionSnapshot())
+    val profile = preferences.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
+    private val dashboard = game.dashboard().stateIn(viewModelScope, SharingStarted.Eagerly, DashboardStatus())
+    private val production = game.production().stateIn(viewModelScope, SharingStarted.Eagerly, ProductionSnapshot())
 
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()

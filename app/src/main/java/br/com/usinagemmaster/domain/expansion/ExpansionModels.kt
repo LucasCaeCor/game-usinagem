@@ -46,6 +46,7 @@ data class ExpansionState(
     val pityEpic: Int = 0,
     val pityLegendary: Int = 0,
     val playerXp: Long = 0L,
+    val claimedRentalXpIds: Set<String> = emptySet(),
     val ownedSkins: Set<String> = setOf("operador_padrao"),
     val equippedSkin: String = "operador_padrao",
     val ownedCharacters: Set<String> = emptySet(),

@@ -32,6 +32,7 @@ class ExpansionRepository @Inject constructor(
         val pityEpic = intPreferencesKey("pity_epic")
         val pityLegendary = intPreferencesKey("pity_legendary")
         val playerXp = longPreferencesKey("player_xp")
+        val claimedRentalXpIds = stringSetPreferencesKey("claimed_rental_xp_ids")
         val ownedSkins = stringSetPreferencesKey("owned_skins")
         val equippedSkin = stringPreferencesKey("equipped_skin")
         val ownedCharacters = stringSetPreferencesKey("owned_characters")
@@ -244,6 +245,20 @@ class ExpansionRepository @Inject constructor(
         }
     }
 
+    suspend fun claimRentalXpReward(rentalId: String, amount: Long): Boolean {
+        if (rentalId.isBlank() || amount <= 0L) return false
+        var claimed = false
+        context.expansionDataStore.edit { prefs ->
+            val ids = prefs[Keys.claimedRentalXpIds] ?: emptySet()
+            if (rentalId !in ids) {
+                prefs[Keys.claimedRentalXpIds] = ids + rentalId
+                prefs[Keys.playerXp] = ((prefs[Keys.playerXp] ?: 0L) + amount).coerceAtLeast(0L)
+                claimed = true
+            }
+        }
+        return claimed
+    }
+
 suspend fun addPlayerXp(amount: Long): Long {
         if (amount <= 0L) return snapshot().playerXp
         var total = 0L
@@ -282,6 +297,7 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
         pityEpic = prefs[Keys.pityEpic] ?: 0,
         pityLegendary = prefs[Keys.pityLegendary] ?: 0,
         playerXp = prefs[Keys.playerXp] ?: 0L,
+        claimedRentalXpIds = prefs[Keys.claimedRentalXpIds] ?: emptySet(),
         ownedSkins = (prefs[Keys.ownedSkins] ?: emptySet()) + "operador_padrao",
         equippedSkin = prefs[Keys.equippedSkin] ?: "operador_padrao",
         ownedCharacters = prefs[Keys.ownedCharacters] ?: emptySet(),

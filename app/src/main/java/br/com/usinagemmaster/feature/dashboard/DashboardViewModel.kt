@@ -22,16 +22,16 @@ class DashboardViewModel @Inject constructor(
 ) : ViewModel() {
     val state = repo.dashboard().stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.Eagerly,
         DashboardStatus()
     )
 
-    val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalPlayerProfile())
+    val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
     private var lastPresenceAt = 0L
 
     val production = repo.production().stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.Eagerly,
         ProductionSnapshot()
     )
 
@@ -42,5 +42,11 @@ class DashboardViewModel @Inject constructor(
             social.publishProfile(playerProfile.value, state.value, production.value)
             lastPresenceAt = now
         }
+    }
+
+
+    // V10_RENAME_COMPANY_VM
+    fun renameCompany(newName: String) = viewModelScope.launch {
+        repo.renameCompany(newName)
     }
 }

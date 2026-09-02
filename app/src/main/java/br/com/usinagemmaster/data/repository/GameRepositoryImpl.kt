@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.data.repository
+import br.com.usinagemmaster.domain.expansion.ContractProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionProgression
 
 import br.com.usinagemmaster.domain.expansion.ExpansionState
@@ -70,7 +71,19 @@ class GameRepositoryImpl @Inject constructor(
 
     override fun machines() = machineDao.observeAll()
     override fun employees() = employeeDao.observeAll()
-    override fun contracts() = contractDao.observeAll()
+    override fun contracts(): Flow<List<ContractEntity>> = combine(
+        contractDao.observeAll(),
+        companyDao.observe(),
+    ) { contracts, company ->
+        val level = maxOf(
+            company?.companyLevel ?: 1,
+            1 + (company?.reputation ?: 0) / 20,
+        )
+        contracts.filter { contract ->
+            contract.status != ContractStatus.AVAILABLE.name ||
+                ContractProgression.minLevel(contract.difficulty) <= level
+        }
+    }
     override fun finances() = financeDao.observeRecent()
     override fun facilities() = facilityDao.observeAll()
     override fun goals() = goalDao.observeAll()
@@ -139,6 +152,9 @@ class GameRepositoryImpl @Inject constructor(
                 summaryDescription = "Fechamento da produção • ${settled / SimulationCadence.CYCLE_MILLIS} ciclo(s) de 10 min"
             )
         }
+    
+        // V8_REFRESH_CONTRACTS_AFTER_TICK
+        generateContractsIfNeeded()
     }
 
     override suspend fun accelerateProduction10Minutes(): Result<Long> = runCatching {
@@ -257,7 +273,7 @@ class GameRepositoryImpl @Inject constructor(
                     )
                     if (paidNow) contractRewards += contract.rewardCents
             // V7_XP_AUTO_CONTRACT
-            if (paidNow) expansionRepository.addPlayerXp(ExpansionProgression.characterXpForContract(contract.difficulty, contract.quantity, contract.requiredQuality))
+            if (paidNow) expansionRepository.addPlayerXp(ContractProgression.characterXp(contract))
                     completedContracts++
                 } else {
                     contractDao.update(
@@ -586,20 +602,51 @@ class GameRepositoryImpl @Inject constructor(
     }
 
     override suspend fun generateContractsIfNeeded() {
-        val missing = (5 - contractDao.availableCount()).coerceAtLeast(0)
+        val company = companyDao.get() ?: return
+        val level = maxOf(company.companyLevel, 1 + company.reputation / 20).coerceAtLeast(1)
+        if (level != company.companyLevel) {
+            companyDao.upsert(company.copy(companyLevel = level))
+        }
+        val existing = contractDao.getAvailableForProgression()
+        val eligibleCount = existing.count { ContractProgression.minLevel(it.difficulty) <= level }
+        val target = ContractProgression.targetAvailable(level)
+        val missing = (target - eligibleCount).coerceAtLeast(0)
         if (missing == 0) return
+
+        val allowed = mutableListOf<Int>()
+        for (difficulty in ContractProgression.allowedDifficulties(level)) {
+            if (expansionRepository.contractAccess(difficulty, level).allowed) allowed += difficulty
+        }
+        val pool = allowed.ifEmpty { listOf(1) }
         val now = System.currentTimeMillis()
-        val clients = listOf("Metalúrgica Horizonte", "AutoPeças Brasil", "AgroMec", "Hidráulica Forte", "AçoSul", "TecnoBombas")
-        val types = listOf("Peça unitária", "Lote pequeno", "Lote médio", "Retrabalho", "Estrutura metálica")
-        val values = (1..missing).map {
-            val difficulty = Random.nextInt(1, 6)
-            val qty = Random.nextInt(4, 30) * difficulty
-            val reward = 350_000L + difficulty * 250_000L + qty * 12_000L
+        val clients = listOf(
+            "Metalúrgica Horizonte", "AutoPeças Brasil", "AgroMec", "Hidráulica Forte",
+            "AçoSul", "TecnoBombas", "AeroMec", "MinasTech", "Ferrovia Sul", "Precision Parts"
+        )
+        val normalTypes = listOf("Peça unitária", "Lote pequeno", "Lote médio", "Retrabalho", "Eixo e flange", "Dispositivo industrial")
+        val specialTypes = listOf("Protótipo crítico", "Lote urgente", "Peça aeroespacial", "Recuperação de emergência", "Tolerância extrema")
+
+        val highestDifficulty = pool.maxOrNull() ?: 1
+        val values = (1..missing).map { slot ->
+            // Garante oportunidades da faixa mais alta recém-liberada, sem eliminar contratos simples.
+            val difficulty = if (slot <= 2) highestDifficulty else pool.random()
+            val special = Random.nextInt(100) < ContractProgression.specialChancePct(level)
+            val qtyUpper = (18 + level * 2).coerceAtMost(70)
+            val qty = Random.nextInt(5, qtyUpper) * difficulty
+            val quality = (45 + difficulty * 8 + if (special) 7 else 0).coerceAtMost(96)
+            val baseReward = 350_000L + difficulty * 280_000L + qty * 13_500L + level * 35_000L
+            val reward = if (special) baseReward * 18L / 10L else baseReward
+            val reputationReward = ContractProgression.reputationReward(difficulty, special)
+            val penalty = if (special) reward / 3L else reward / 4L
+            val repPenalty = difficulty + if (special) 2 else 0
+            val hours = (8 + difficulty * 3 - if (special) 2 else 0).coerceAtLeast(6)
+            val job = if (special) "⭐ Especial • ${specialTypes.random()}" else normalTypes.random()
+
             ContractEntity(
-                UUID.randomUUID().toString(), clients.random(), types.random(), qty, 0, difficulty,
-                45 + difficulty * 9, reward, reward / 4, difficulty * 2, difficulty,
-                now, null, now + (6L + difficulty * 3L) * 60L * 60L * 1000L,
-                ContractStatus.AVAILABLE.name
+                UUID.randomUUID().toString(), clients.random(), job, qty, 0, difficulty,
+                quality, reward, penalty, reputationReward, repPenalty,
+                now, null, now + hours * 60L * 60L * 1000L,
+                ContractStatus.AVAILABLE.name,
             )
         }
         contractDao.insertAll(values)
@@ -666,7 +713,7 @@ class GameRepositoryImpl @Inject constructor(
 
             if (rewardPaid) expansionRepository.consumeBoundTool(current.id)
             // V7_XP_MANUAL_CONTRACT
-            if (rewardPaid) expansionRepository.addPlayerXp(ExpansionProgression.characterXpForContract(current.difficulty, current.quantity, current.requiredQuality))
+            if (rewardPaid) expansionRepository.addPlayerXp(ContractProgression.characterXp(current))
 
             val latestCompany = companyDao.get() ?: error("Empresa não inicializada")
             val correctedLevel = (1 + latestCompany.reputation / 20).coerceAtLeast(latestCompany.companyLevel)
@@ -868,5 +915,24 @@ class GameRepositoryImpl @Inject constructor(
         MachineType.CYLINDRICAL_GRINDER, MachineType.CNC_GRINDER -> SectorType.GRINDING
         MachineType.WELDING_BENCH, MachineType.ROBOTIC_WELDING,
         MachineType.LASER_CUTTER, MachineType.PLASMA_CUTTER -> SectorType.BOILERMAKING
+    }
+
+
+    // V10_COMPANY_NAME_IMPL
+    override suspend fun renameCompany(newName: String): Result<Unit> = runCatching {
+        val normalized = newName
+            .trim()
+            .replace(Regex("\\s+"), " ")
+        require(normalized.length in 3..32) {
+            "O nome da empresa deve ter entre 3 e 32 caracteres"
+        }
+        require(normalized.any { it.isLetterOrDigit() }) {
+            "Digite um nome válido para a empresa"
+        }
+
+        val company = companyDao.get() ?: error("Empresa não inicializada")
+        if (company.name != normalized) {
+            companyDao.upsert(company.copy(name = normalized))
+        }
     }
 }

@@ -28,9 +28,9 @@ class SocialViewModel @Inject constructor(
     private val gamePrefs: GamePreferences,
     game: GameRepository
 ) : ViewModel() {
-    val profile = playerPrefs.profile.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalPlayerProfile())
-    private val dashboard = game.dashboard().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardStatus())
-    private val production = game.production().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProductionSnapshot())
+    val profile = playerPrefs.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
+    private val dashboard = game.dashboard().stateIn(viewModelScope, SharingStarted.Eagerly, DashboardStatus())
+    private val production = game.production().stateIn(viewModelScope, SharingStarted.Eagerly, ProductionSnapshot())
 
     private val _connection = MutableStateFlow(SocialConnectionState(configured = social.isFirebaseConfigured()))
     val connection = _connection.asStateFlow()

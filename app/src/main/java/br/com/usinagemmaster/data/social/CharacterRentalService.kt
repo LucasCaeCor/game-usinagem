@@ -31,6 +31,12 @@ data class RemoteHireResult(
     val endsAt: Long,
 )
 
+data class CharacterRentalXpReward(
+    val rentalId: String,
+    val xp: Long,
+    val endsAt: Long,
+)
+
 @Singleton
 class CharacterRentalService @Inject constructor() {
     private val auth get() = FirebaseAuth.getInstance()
@@ -49,7 +55,7 @@ class CharacterRentalService @Inject constructor() {
         val firestore = error as? FirebaseFirestoreException
         return if (firestore?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
             IllegalStateException(
-                "O Firestore bloqueou o Mercado de Personagens. Publique as regras V7 (character_offers/character_rentals) no Firebase Console ou com: firebase deploy --only firestore:rules",
+                "O Firestore bloqueou o Mercado de Personagens. Publique as regras character_offers/character_rentals no Firebase Console.",
                 error,
             )
         } else error
@@ -108,6 +114,37 @@ class CharacterRentalService @Inject constructor() {
         }
     }
 
+    /**
+     * Experiência externa: quando SEU personagem termina uma contratação de 48h
+     * em outra fábrica, essa contratação passa a render XP ao personagem.
+     * O DataStore do jogo impede coletar a mesma contratação duas vezes.
+     */
+    suspend fun completedRentalXpForOwner(): List<CharacterRentalXpReward> {
+        val user = googleUser()
+        val now = System.currentTimeMillis()
+        try {
+            return db.collection("character_rentals")
+                .whereEqualTo("ownerUid", user.uid)
+                .limit(60)
+                .get()
+                .await()
+                .documents
+                .mapNotNull { doc ->
+                    val endsAt = doc.getTimestamp("endsAt")?.toDate()?.time ?: return@mapNotNull null
+                    if (endsAt > now) return@mapNotNull null
+                    val level = (doc.getLong("characterLevel") ?: 1L).toInt().coerceAtLeast(1)
+                    val boost = (doc.getLong("boostPct") ?: 4L).toInt().coerceIn(4, 25)
+                    CharacterRentalXpReward(
+                        rentalId = doc.id,
+                        xp = ExpansionProgression.characterXpForRental(level, boost),
+                        endsAt = endsAt,
+                    )
+                }
+        } catch (error: Throwable) {
+            throw marketError(error)
+        }
+    }
+
     suspend fun hire(offer: CharacterOffer): RemoteHireResult {
         val user = googleUser()
         require(user.uid != offer.ownerUid) { "Você não pode contratar seu próprio personagem" }
@@ -121,21 +158,26 @@ class CharacterRentalService @Inject constructor() {
                 require(current.exists()) { "Oferta não está mais disponível" }
                 val leasedUntil = current.getTimestamp("leasedUntil")?.toDate()?.time ?: 0L
                 require(leasedUntil <= now) { "Esse personagem acabou de ser contratado por outra empresa" }
-                tx.update(offerRef, mapOf(
-                    "leasedBy" to user.uid,
-                    "leasedUntil" to Timestamp(Date(endsAt)),
-                ))
+                tx.update(
+                    offerRef,
+                    mapOf(
+                        "leasedBy" to user.uid,
+                        "leasedUntil" to Timestamp(Date(endsAt)),
+                    ),
+                )
             }.await()
 
-            db.collection("character_rentals").add(mapOf(
-                "ownerUid" to offer.ownerUid,
-                "renterUid" to user.uid,
-                "playerName" to offer.playerName,
-                "boostPct" to offer.boostPct,
-                "characterLevel" to offer.characterLevel,
-                "startedAt" to Timestamp(Date(now)),
-                "endsAt" to Timestamp(Date(endsAt)),
-            )).await()
+            db.collection("character_rentals").add(
+                mapOf(
+                    "ownerUid" to offer.ownerUid,
+                    "renterUid" to user.uid,
+                    "playerName" to offer.playerName,
+                    "boostPct" to offer.boostPct,
+                    "characterLevel" to offer.characterLevel,
+                    "startedAt" to Timestamp(Date(now)),
+                    "endsAt" to Timestamp(Date(endsAt)),
+                ),
+            ).await()
         } catch (error: Throwable) {
             throw marketError(error)
         }

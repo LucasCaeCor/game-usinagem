@@ -18,17 +18,17 @@ import javax.inject.Inject
 class EmployeesViewModel @Inject constructor(private val repo: GameRepository) : ViewModel() {
     val employees = repo.employees().stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.Eagerly,
         emptyList<EmployeeEntity>()
     )
     val dashboard = repo.dashboard().stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.Eagerly,
         DashboardStatus()
     )
     val legendaryMissions = repo.legendaryMissions().stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.Eagerly,
         emptyList<LegendaryMissionEntity>()
     )
 

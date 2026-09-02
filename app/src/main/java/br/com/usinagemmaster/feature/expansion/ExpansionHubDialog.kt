@@ -72,7 +72,7 @@ fun ExpansionHubDialog(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
             ExpansionHubContent(state, viewModel, onDismiss)
         }
     }
@@ -174,7 +174,7 @@ private fun GoogleLoginBanner(state: ExpansionUiState, vm: ExpansionViewModel) {
 private fun GachaTab(state: ExpansionUiState, vm: ExpansionViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            ElevatedCard {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Roleta Industrial", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("Fichas: ${state.expansion.gachaTickets} • Pity épico ${state.expansion.pityEpic}/30 • lendário ${state.expansion.pityLegendary}/80")
@@ -354,10 +354,10 @@ private fun CompletedContractsTab(state: ExpansionUiState, vm: ExpansionViewMode
             Text("Contratos concluídos não ocupam mais a lista normal. O pagamento continua registrado no financeiro.")
         }
         if (state.completedContracts.isEmpty()) {
-            item { ElevatedCard { Text("Nenhum contrato concluído arquivado.", Modifier.padding(18.dp)) } }
+            item { ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Text("Nenhum contrato concluído arquivado.", Modifier.padding(18.dp)) } }
         }
         items(state.completedContracts, key = { it.id }) { contract ->
-            ElevatedCard {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -395,7 +395,7 @@ private fun CompanyTab(state: ExpansionUiState, vm: ExpansionViewModel) {
             Text("Defina o foco técnico. Especialidades mais avançadas liberam com o nível.")
         }
         items(CompanySpecialty.entries) { spec ->
-            ElevatedCard { Column(Modifier.padding(14.dp)) {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Column(Modifier.padding(14.dp)) {
                 Text(spec.label, fontWeight = FontWeight.Bold)
                 Text(spec.description, style = MaterialTheme.typography.bodySmall)
                 val selected = state.expansion.specialty == spec.code
@@ -412,7 +412,7 @@ private fun CompanyTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 @Composable
 private fun PremiumMachineCard(machine: PremiumMachineDefinition, state: ExpansionUiState, vm: ExpansionViewModel, showBuy: Boolean) {
     val owned = machine.id in state.expansion.premiumMachines
-    ElevatedCard {
+    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) {
         Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(14.dp), color = if (owned) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
                 Text("🏭", Modifier.padding(12.dp), style = MaterialTheme.typography.headlineLarge)
@@ -470,7 +470,7 @@ private fun SkillsTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 @Composable
 private fun SkillCard(skill: SkillDefinition, owned: Boolean, level: Int, ownedSet: Set<String>, unlock: () -> Unit) {
     val prerequisiteOk = skill.prerequisite == null || skill.prerequisite in ownedSet
-    ElevatedCard { Column(Modifier.padding(14.dp)) {
+    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Column(Modifier.padding(14.dp)) {
         Text(skill.name, fontWeight = FontWeight.Bold)
         Text(skill.description, style = MaterialTheme.typography.bodySmall)
         Text("Nível ${skill.minLevel}${skill.prerequisite?.let { " • requer $it" } ?: ""}", style = MaterialTheme.typography.labelSmall)
@@ -488,7 +488,7 @@ private fun ToolsTab(state: ExpansionUiState, vm: ExpansionViewModel) {
         if (state.activeContracts.isEmpty()) item { Text("Nenhum contrato ativo para equipar ferramenta.") }
         items(state.activeContracts, key = { it.id }) { contract ->
             val bound = state.expansion.contractTools[contract.id]
-            ElevatedCard { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(contract.clientName, fontWeight = FontWeight.Bold)
                 Text("Dificuldade ${contract.difficulty} • qualidade ${contract.requiredQuality}", style = MaterialTheme.typography.bodySmall)
                 Text("Equipada: ${ExpansionCatalog.tools.firstOrNull { it.id == bound }?.name ?: "nenhuma"}")
@@ -523,7 +523,7 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
                 icon = "👷",
                 title = "Nível do personagem",
                 progress = xp,
-                explanation = "Como ganhar XP: conclua contratos (dificuldade, volume e qualidade aumentam o ganho) e desenvolva pesquisas/skills do personagem. O XP é permanente e não é perdido ao cancelar ou falhar contratos.",
+                explanation = "Como ganhar XP: conclua contratos na sua fábrica (dificuldade, volume e qualidade aumentam o ganho), desenvolva pesquisas/skills pessoais e deixe seu personagem trabalhar 48h em outras fábricas. Ao terminar um aluguel, abra/atualize o Mercado para coletar a experiência externa. O XP é permanente.",
             )
         }
 
@@ -534,7 +534,7 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
         items(ExpansionCatalog.skins) { skin ->
             val unlockedByLevel = state.companyLevel >= skin.minLevel
             val obtained = skin.id in state.expansion.ownedSkins || (!skin.gachaOnly && unlockedByLevel)
-            ElevatedCard { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (skin.id.contains("princesa")) "👸" else "🧑‍🏭", style = MaterialTheme.typography.headlineLarge)
                 Column(Modifier.weight(1f)) {
                     Text("${skin.rarity.label} • ${skin.name}", fontWeight = FontWeight.Bold)
@@ -553,7 +553,7 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
         }
         items(ExpansionCatalog.gachaCharacters) { character ->
             val owned = character.id in state.expansion.ownedCharacters
-            ElevatedCard { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("👷", style = MaterialTheme.typography.headlineLarge)
                 Column(Modifier.weight(1f)) {
                     Text("${character.rarity.label} • ${character.name}", fontWeight = FontWeight.Bold)
@@ -567,6 +567,8 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
         item {
             HorizontalDivider()
             Text("Mercado conectado • contratação por 48h", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("V8_RENTAL_XP_EXPLANATION • Quando outro jogador contrata SEU personagem e as 48h terminam, ele ganha XP de experiência externa. Use Buscar/Atualizar ou o botão abaixo para coletar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = vm::collectRentalXp, enabled = !state.busy) { Text("Coletar XP de trabalhos externos") }
             val hired = state.expansion.remoteHireName
             if (hired != null && state.expansion.remoteHireEndsAt > System.currentTimeMillis()) {
                 Text("Na sua empresa: $hired • +${state.expansion.remoteHireBoostPct}% até ${dateTime(state.expansion.remoteHireEndsAt)}")
@@ -582,7 +584,7 @@ private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 
 @Composable
 private fun RentalOfferCard(offer: CharacterOffer, state: ExpansionUiState, vm: ExpansionViewModel) {
-    ElevatedCard { Column(Modifier.padding(14.dp)) {
+    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Column(Modifier.padding(14.dp)) {
         Text(offer.playerName, fontWeight = FontWeight.Bold)
         Text("Personagem nível ${offer.characterLevel} • benefício +${offer.boostPct}% produção por 48h")
         Text("Skills: ${if (offer.skills.isEmpty()) "iniciante" else offer.skills.joinToString()}", style = MaterialTheme.typography.bodySmall)
@@ -600,7 +602,7 @@ private fun AccountTab(state: ExpansionUiState, vm: ExpansionViewModel) {
             Text("O botão também aparece permanentemente no topo do Centro de Evolução.")
         }
         item {
-            ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.accountEmail == null) {
                     Text("Nenhuma conta Google conectada")
                     Button(onClick = {

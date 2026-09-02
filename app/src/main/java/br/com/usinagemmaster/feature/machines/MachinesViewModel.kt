@@ -36,14 +36,14 @@ class MachinesViewModel @Inject constructor(
     private val expansionRepository: ExpansionRepository,
     private val premiumMachineInstaller: PremiumMachineInstaller
 ) : ViewModel() {
-    val machines = repo.machines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<MachineEntity>())
-    val employees = repo.employees().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<EmployeeEntity>())
-    val production = repo.production().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProductionSnapshot())
-    val dashboard = repo.dashboard().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardStatus())
-    val settings = prefs.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GameSettings())
-    val engagement = prefs.engagement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EngagementState())
-    val workforce = prefs.workforce.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkforceState())
-    val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalPlayerProfile())
+    val machines = repo.machines().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<MachineEntity>())
+    val employees = repo.employees().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<EmployeeEntity>())
+    val production = repo.production().stateIn(viewModelScope, SharingStarted.Eagerly, ProductionSnapshot())
+    val dashboard = repo.dashboard().stateIn(viewModelScope, SharingStarted.Eagerly, DashboardStatus())
+    val settings = prefs.settings.stateIn(viewModelScope, SharingStarted.Eagerly, GameSettings())
+    val engagement = prefs.engagement.stateIn(viewModelScope, SharingStarted.Eagerly, EngagementState())
+    val workforce = prefs.workforce.stateIn(viewModelScope, SharingStarted.Eagerly, WorkforceState())
+    val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
 
     private var lastPresenceAt = 0L
     private val _message = MutableStateFlow<String?>(null)

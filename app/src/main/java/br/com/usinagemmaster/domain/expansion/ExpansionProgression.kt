@@ -72,5 +72,9 @@ object ExpansionProgression {
     }
 
     fun characterXpForResearch(): Long = 120L
+
+    /** XP por completar 48h contratado em outra fábrica. */
+    fun characterXpForRental(characterLevel: Int, boostPct: Int): Long =
+        450L + characterLevel.coerceAtLeast(1) * 70L + boostPct.coerceIn(0, 25) * 15L
     fun characterXpForPremiumInstall(): Long = 160L
 }

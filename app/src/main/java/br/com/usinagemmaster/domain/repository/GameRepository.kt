@@ -46,4 +46,8 @@ interface GameRepository {
 
 suspend fun cancelContract(contractId: String): Result<Long>
     suspend fun dismissFailedContract(contractId: String): Result<Unit>
+
+
+    // V10_COMPANY_NAME_API
+    suspend fun renameCompany(newName: String): Result<Unit>
 }

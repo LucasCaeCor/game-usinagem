@@ -544,7 +544,7 @@ private fun FactoryMachineQuickCard(
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Black, maxLines = 1)
+                Text(title, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1)
                 Text(
                     "${if (operating) "Produzindo" else "Em espera"} • conservação ${machine.condition}%",
                     style = MaterialTheme.typography.labelSmall,
@@ -661,7 +661,7 @@ private fun FactoryEarningsPanel(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text("PRÓXIMO FECHAMENTO", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9EACB2))
-                    Text(String.format(Locale.getDefault(), "%02d:%02d", min, sec), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                    Text(String.format(Locale.getDefault(), "%02d:%02d", min, sec), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge, color = Color.White)
                 }
             }
             LinearProgressIndicator(
