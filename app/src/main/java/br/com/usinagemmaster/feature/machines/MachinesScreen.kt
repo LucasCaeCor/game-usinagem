@@ -61,9 +61,13 @@ private enum class WarehouseMode { LIVE, LAYOUT, LIST }
 
 @Composable
 fun MachinesScreen(
-    onNavigate: (String) -> Unit = {},
+    onNavigate: (String) -> Unit,
     vm: MachinesViewModel = hiltViewModel()
 ) {
+    // V11_WORK_LIFE_UI
+    val workLifeVm: WorkLifeViewModel = hiltViewModel()
+    val workLife by workLifeVm.state.collectAsState()
+
     // EXPANSION_HUB_INJECTED
     val expansionHubVisible = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 

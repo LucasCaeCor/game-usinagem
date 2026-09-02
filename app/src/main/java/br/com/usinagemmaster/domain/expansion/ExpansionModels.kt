@@ -263,13 +263,33 @@ object ExpansionCatalog {
     )
 
     val gachaCharacters = listOf(
+        // Personagens comuns/raros: exclusivos da roleta e SEM repetição.
+        GachaCharacterDefinition("operador_multitarefa", "Operador Multitarefa", 1, Rarity.COMMON, "+2% de produção global.", globalSpeedPct = 2),
+        GachaCharacterDefinition("torneiro_junior", "Torneiro Júnior", 2, Rarity.COMMON, "+5% em torneamento.", turningPct = 5),
         GachaCharacterDefinition("cuca_aprendiz", "Cuca • Aprendiz de Setup", 2, Rarity.RARE, "+3% de produção global.", globalSpeedPct = 3),
+        GachaCharacterDefinition("fresadora_agil", "Fresadora Ágil", 3, Rarity.RARE, "+7% em fresagem.", millingPct = 7),
+        GachaCharacterDefinition("controle_qualidade", "Controle de Qualidade", 4, Rarity.RARE, "+4 de qualidade.", qualityBonus = 4),
+
+        // PREMIUM: não saem mais na roleta. São comprados permanentemente na Loja de Personagens.
         GachaCharacterDefinition("mestre_torneiro", "Mestre Torneiro", 5, Rarity.EPIC, "+12% em torneamento.", turningPct = 12),
         GachaCharacterDefinition("programadora_cnc", "Programadora CNC", 6, Rarity.EPIC, "+10% CNC e +3 qualidade.", qualityBonus = 3, cncPct = 10),
         GachaCharacterDefinition("inspetor_zero", "Inspetor Zero", 7, Rarity.EPIC, "+8 de qualidade.", qualityBonus = 8),
         GachaCharacterDefinition("mestre_5_eixos", "Mestre dos 5 Eixos", 10, Rarity.LEGENDARY, "+8% global, +10% fresagem e +10% CNC.", globalSpeedPct = 8, millingPct = 10, cncPct = 10),
         GachaCharacterDefinition("lenda_chao_fabrica", "Lenda do Chão de Fábrica", 14, Rarity.LEGENDARY, "+12% global e +5 qualidade.", globalSpeedPct = 12, qualityBonus = 5),
     )
+
+
+    fun isPremiumCharacter(character: GachaCharacterDefinition): Boolean =
+        character.rarity == Rarity.EPIC || character.rarity == Rarity.LEGENDARY
+
+    fun premiumCharacterPriceCents(id: String): Long = when (id) {
+        "mestre_torneiro" -> 12_000_000L
+        "programadora_cnc" -> 16_000_000L
+        "inspetor_zero" -> 18_000_000L
+        "mestre_5_eixos" -> 35_000_000L
+        "lenda_chao_fabrica" -> 48_000_000L
+        else -> 0L
+    }
 
     val tools = listOf(
         ToolDefinition("broca_madeira", "Broca de madeira", Rarity.COMMON, 1.02, -2, "Ferramenta improvisada e básica: +2% velocidade, -2 qualidade."),

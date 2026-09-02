@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.feature.store
+import br.com.usinagemmaster.feature.expansion.PremiumCharacterStoreButton
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,8 @@ fun StoreScreen(vm: StoreViewModel = hiltViewModel()) {
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).padding(top = 20.dp)) {
+        PremiumCharacterStoreButton()
+
             ScreenHeader("Loja de Máquinas", "Modernize sua oficina e aumente a produção")
             LazyColumn(
                 contentPadding = PaddingValues(16.dp),

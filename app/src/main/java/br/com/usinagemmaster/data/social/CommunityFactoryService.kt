@@ -41,12 +41,17 @@ class CommunityFactoryService @Inject constructor(
     private val firestore get() = FirebaseFirestore.getInstance()
     private val auth get() = FirebaseAuth.getInstance()
 
+    private fun googleUser() = auth.currentUser
+        ?.takeIf { user -> user.providerData.any { it.providerId == "google.com" } && !user.email.isNullOrBlank() }
+        ?: error("Conecte uma conta Google real no Perfil para publicar ou visitar fábricas.")
+
     suspend fun publishMine() {
-        val user = auth.currentUser ?: return
+        val user = googleUser()
         val dashboard = gameRepository.dashboard().first()
         val machines = gameRepository.machines().first()
         val employees = gameRepository.employees().first()
         val expansion = expansionRepository.snapshot()
+
         val machineMaps = machines.filter { it.installed }.take(30).map { m ->
             mapOf(
                 "id" to m.id,
@@ -55,12 +60,13 @@ class CommunityFactoryService @Inject constructor(
                 "level" to m.level,
                 "x" to m.gridX,
                 "y" to m.gridY,
-                "premium" to m.id.startsWith("gacha_premium_")
+                "premium" to m.id.startsWith("gacha_premium_"),
             )
         }
+
         val data = mapOf(
             "uid" to user.uid,
-            "playerName" to (user.displayName ?: "Mestre da Usinagem"),
+            "playerName" to (user.displayName ?: user.email?.substringBefore("@") ?: "Mestre da Usinagem"),
             "companyName" to dashboard.companyName,
             "companyLevel" to dashboard.companyLevel,
             "reputation" to dashboard.reputation,
@@ -69,11 +75,16 @@ class CommunityFactoryService @Inject constructor(
             "updatedAt" to System.currentTimeMillis(),
             "machines" to machineMaps,
         )
-        firestore.collection("public_factories").document(user.uid).set(data, SetOptions.merge()).await()
+
+        firestore.collection("public_factories")
+            .document(user.uid)
+            .set(data, SetOptions.merge())
+            .await()
     }
 
     suspend fun list(): List<CommunityFactory> {
-        val snap = firestore.collection("public_factories").limit(60).get().await()
+        val user = googleUser()
+        val snap = firestore.collection("public_factories").limit(80).get().await()
         return snap.documents.mapNotNull { d ->
             runCatching {
                 val rawMachines = d.get("machines") as? List<*> ?: emptyList<Any>()
@@ -83,7 +94,7 @@ class CommunityFactoryService @Inject constructor(
                     companyName = d.getString("companyName") ?: "Usinagem",
                     companyLevel = (d.getLong("companyLevel") ?: 1).toInt(),
                     reputation = (d.getLong("reputation") ?: 0).toInt(),
-                    specialty = d.getString("specialty") ?: "generalist",
+                    specialty = d.getString("specialty") ?: "generalista",
                     employeeCount = (d.getLong("employeeCount") ?: 0).toInt(),
                     updatedAt = d.getLong("updatedAt") ?: 0L,
                     machines = rawMachines.mapNotNull { row ->
@@ -97,9 +108,11 @@ class CommunityFactoryService @Inject constructor(
                             y = (m["y"] as? Number)?.toInt() ?: 0,
                             premium = m["premium"] as? Boolean ?: false,
                         )
-                    }
+                    },
                 )
             }.getOrNull()
-        }.sortedByDescending { it.updatedAt }
+        }
+            .filter { it.uid != user.uid }
+            .sortedByDescending { it.updatedAt }
     }
 }

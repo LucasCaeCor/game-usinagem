@@ -43,7 +43,7 @@ import kotlin.random.Random
 
 private enum class ExpansionTab(val label: String) {
     GACHA("Roleta"), COMPANY("Empresa"), SKILLS("Skills"), TOOLS("Ferramentas"),
-    CHARACTER("Personagem"), CONTRACTS("Concluídos"), ACCOUNT("Conta")
+    CHARACTER("Personagens"), CONTRACTS("Concluídos"), ACCOUNT("Conta")
 }
 
 private data class WheelSector(val type: String, val label: String, val symbol: String)
@@ -53,16 +53,16 @@ private data class WheelSector(val type: String, val label: String, val symbol: 
 private val wheelSectors = listOf(
     WheelSector("tool", "Ferramenta", "🔧"),
     WheelSector("skin", "Skin", "👑"),
-    WheelSector("tool", "Ferramenta", "🛠"),
-    WheelSector("ticket", "Ficha", "🎟"),
     WheelSector("character", "Personagem", "👷"),
-    WheelSector("tool", "Ferramenta", "⚙"),
+    WheelSector("tool", "Ferramenta", "🛠"),
+    WheelSector("machine", "Máquina TOP", "🏭"),
     WheelSector("skin", "Skin", "✨"),
-    WheelSector("ticket", "Ficha", "🎫"),
+    WheelSector("tool", "Ferramenta", "⚙"),
+    WheelSector("character", "Personagem", "🧑‍🏭"),
     WheelSector("machine", "Máquina TOP", "🏭"),
     WheelSector("tool", "Ferramenta", "🔩"),
-    WheelSector("character", "Personagem", "🧑‍🏭"),
-    WheelSector("ticket", "Ficha", "🎟"),
+    WheelSector("skin", "Skin", "👑"),
+    WheelSector("tool", "Ferramenta", "🔧"),
 )
 
 @Composable
@@ -283,10 +283,9 @@ private fun GachaWheelV3(state: ExpansionUiState, vm: ExpansionViewModel) {
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Text("🏭 Máquina TOP", style = MaterialTheme.typography.labelSmall)
-            Text("🎟 Fichas", style = MaterialTheme.typography.labelSmall)
+            Text("🔧 Sem cupom como prêmio", style = MaterialTheme.typography.labelSmall)
         }
-
-        Button(
+Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = !spinning && !state.busy && state.expansion.gachaTickets > 0,
             onClick = {
@@ -331,7 +330,6 @@ private fun RewardCard(reward: GachaReward) {
         "skin" -> "👑"
         "tool" -> "🔧"
         "machine" -> "🏭"
-        "ticket" -> "🎟"
         else -> "🎁"
     }
     ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -515,70 +513,234 @@ private fun ToolsTab(state: ExpansionUiState, vm: ExpansionViewModel) {
 
 @Composable
 private fun CharacterTab(state: ExpansionUiState, vm: ExpansionViewModel) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // V7_CHARACTER_XP_CARD
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         item {
             val xp = state.expansion.playerProgress()
             XpProgressCard(
                 icon = "👷",
-                title = "Nível do personagem",
+                title = "Nível do personagem principal",
                 progress = xp,
-                explanation = "Como ganhar XP: conclua contratos na sua fábrica (dificuldade, volume e qualidade aumentam o ganho), desenvolva pesquisas/skills pessoais e deixe seu personagem trabalhar 48h em outras fábricas. Ao terminar um aluguel, abra/atualize o Mercado para coletar a experiência externa. O XP é permanente.",
+                explanation = "Seu personagem principal ganha XP concluindo contratos, pesquisando skills pessoais e quando termina trabalhos de 48h em outras empresas.",
             )
         }
 
         item {
-            Text("Personagem principal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Skin equipada: ${ExpansionCatalog.skins.firstOrNull { it.id == state.expansion.equippedSkin }?.name ?: state.expansion.equippedSkin}")
+            Text("Visual do personagem principal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "Skins mudam o visual e podem trazer bônus. Personagens especialistas são uma categoria separada.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+
         items(ExpansionCatalog.skins) { skin ->
             val unlockedByLevel = state.companyLevel >= skin.minLevel
             val obtained = skin.id in state.expansion.ownedSkins || (!skin.gachaOnly && unlockedByLevel)
-            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (skin.id.contains("princesa")) "👸" else "🧑‍🏭", style = MaterialTheme.typography.headlineLarge)
-                Column(Modifier.weight(1f)) {
-                    Text("${skin.rarity.label} • ${skin.name}", fontWeight = FontWeight.Bold)
-                    Text(skin.description, style = MaterialTheme.typography.bodySmall)
-                    if (skin.gachaOnly && skin.id !in state.expansion.ownedSkins) Text("Obtida na roleta • depois exige nível ${skin.minLevel}", style = MaterialTheme.typography.labelSmall)
-                    Button(onClick = { vm.equipSkin(skin.id) }, enabled = obtained && unlockedByLevel && state.expansion.equippedSkin != skin.id) {
-                        Text(if (!obtained) "Falta obter na roleta" else if (!unlockedByLevel) "Libera nível ${skin.minLevel}" else if (state.expansion.equippedSkin == skin.id) "Equipada" else "Equipar")
+
+            ElevatedCard {
+                Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (skin.id.contains("princesa")) "👸" else "🧑‍🏭", style = MaterialTheme.typography.headlineLarge)
+                    Column(Modifier.weight(1f)) {
+                        Text("${skin.rarity.label} • ${skin.name}", fontWeight = FontWeight.Bold)
+                        Text(skin.description, style = MaterialTheme.typography.bodySmall)
+                        if (skin.gachaOnly && skin.id !in state.expansion.ownedSkins) {
+                            Text(
+                                "Obtida na roleta • depois exige nível ${skin.minLevel}",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Button(
+                            onClick = { vm.equipSkin(skin.id) },
+                            enabled = obtained && unlockedByLevel && state.expansion.equippedSkin != skin.id,
+                        ) {
+                            Text(
+                                when {
+                                    !obtained -> "Falta obter na roleta"
+                                    !unlockedByLevel -> "Libera nível ${skin.minLevel}"
+                                    state.expansion.equippedSkin == skin.id -> "Equipada"
+                                    else -> "Equipar"
+                                }
+                            )
+                        }
                     }
                 }
-            } }
+            }
         }
+
         item {
             HorizontalDivider()
-            Text("Personagens da roleta", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Equipe um personagem gacha como especialista ativo. Apenas um bônus fica ativo por vez.")
+            Text("🎰 Personagens da roleta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(
+                "A roleta só entrega personagens comuns/raros e nunca repete um personagem que você já possui. Quando completar todos, o setor de personagem é convertido em ferramenta.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        items(ExpansionCatalog.gachaCharacters) { character ->
+
+        items(
+            ExpansionCatalog.gachaCharacters.filterNot { ExpansionCatalog.isPremiumCharacter(it) },
+            key = { it.id },
+        ) { character ->
             val owned = character.id in state.expansion.ownedCharacters
-            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface)) { Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("👷", style = MaterialTheme.typography.headlineLarge)
-                Column(Modifier.weight(1f)) {
-                    Text("${character.rarity.label} • ${character.name}", fontWeight = FontWeight.Bold)
-                    Text(character.description, style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = { vm.equipCharacter(character.id) }, enabled = owned && state.companyLevel >= character.minLevel && state.expansion.equippedCharacter != character.id) {
-                        Text(if (!owned) "Falta obter na roleta" else if (state.companyLevel < character.minLevel) "Libera nível ${character.minLevel}" else if (state.expansion.equippedCharacter == character.id) "Ativo" else "Ativar")
+
+            ElevatedCard {
+                Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (character.rarity == Rarity.RARE) "🧑‍🔧" else "👷", style = MaterialTheme.typography.headlineLarge)
+                    Column(Modifier.weight(1f)) {
+                        Text("${character.rarity.label} • ${character.name}", fontWeight = FontWeight.Bold)
+                        Text(character.description, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            if (owned) "✓ Já adquirido • não volta a sair na roleta" else "Disponível na roleta",
+                            color = if (owned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Button(
+                            onClick = { vm.equipCharacter(character.id) },
+                            enabled = owned &&
+                                state.companyLevel >= character.minLevel &&
+                                state.expansion.equippedCharacter != character.id,
+                        ) {
+                            Text(
+                                when {
+                                    !owned -> "Ainda não adquirido"
+                                    state.companyLevel < character.minLevel -> "Libera nível ${character.minLevel}"
+                                    state.expansion.equippedCharacter == character.id -> "Ativo"
+                                    else -> "Ativar especialista"
+                                }
+                            )
+                        }
                     }
                 }
-            } }
+            }
         }
+
         item {
             HorizontalDivider()
-            Text("Mercado conectado • contratação por 48h", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("V8_RENTAL_XP_EXPLANATION • Quando outro jogador contrata SEU personagem e as 48h terminam, ele ganha XP de experiência externa. Use Buscar/Atualizar ou o botão abaixo para coletar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = vm::collectRentalXp, enabled = !state.busy) { Text("Coletar XP de trabalhos externos") }
+            Text("💎 Loja de Personagens Premium", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(
+                "Premium não sai mais na roleta e não é alugado no mercado. Você compra uma vez por um valor alto e mantém o especialista permanentemente.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        items(
+            ExpansionCatalog.gachaCharacters.filter { ExpansionCatalog.isPremiumCharacter(it) },
+            key = { it.id },
+        ) { character ->
+            val owned = character.id in state.expansion.ownedCharacters
+            val price = ExpansionCatalog.premiumCharacterPriceCents(character.id)
+            val canBuy = !owned &&
+                state.companyLevel >= character.minLevel &&
+                state.cashCents >= price &&
+                !state.busy
+
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = if (character.rarity == Rarity.LEGENDARY)
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    else
+                        MaterialTheme.colorScheme.secondaryContainer,
+                )
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (character.rarity == Rarity.LEGENDARY) "🌟" else "💎",
+                            style = MaterialTheme.typography.headlineLarge,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("${character.rarity.label.uppercase()} • ${character.name}", fontWeight = FontWeight.Black)
+                            Text("Exige nível ${character.minLevel}", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text(money(price), fontWeight = FontWeight.Black)
+                    }
+
+                    Text(character.description, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Vantagem permanente enquanto estiver como especialista ativo.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+
+                    when {
+                        owned -> {
+                            Button(
+                                onClick = { vm.equipCharacter(character.id) },
+                                enabled = state.expansion.equippedCharacter != character.id && !state.busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(if (state.expansion.equippedCharacter == character.id) "ATIVO" else "ATIVAR PREMIUM")
+                            }
+                        }
+                        state.companyLevel < character.minLevel -> {
+                            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                                Text("LIBERA NO NÍVEL ${character.minLevel}")
+                            }
+                        }
+                        state.cashCents < price -> {
+                            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                                Text("FALTAM ${money((price - state.cashCents).coerceAtLeast(0L))}")
+                            }
+                        }
+                        else -> {
+                            Button(
+                                onClick = { vm.buyPremiumCharacter(character.id) },
+                                enabled = canBuy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("COMPRAR PERMANENTEMENTE • ${money(price)}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            HorizontalDivider()
+            Text("🌐 Mercado conectado • 48h", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(
+                "Aqui você NÃO contrata os personagens premium da loja. Você contrata o personagem principal de OUTRO JOGADOR por 48h, usando as skills e o nível dele como benefício temporário.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             val hired = state.expansion.remoteHireName
             if (hired != null && state.expansion.remoteHireEndsAt > System.currentTimeMillis()) {
-                Text("Na sua empresa: $hired • +${state.expansion.remoteHireBoostPct}% até ${dateTime(state.expansion.remoteHireEndsAt)}")
+                Text(
+                    "Na sua empresa: $hired • +${state.expansion.remoteHireBoostPct}% até ${dateTime(state.expansion.remoteHireEndsAt)}",
+                    fontWeight = FontWeight.Bold,
+                )
             }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = vm::publishCharacter, enabled = state.accountEmail != null && !state.busy) { Text("Ofertar meu personagem") }
-                OutlinedButton(onClick = vm::loadOffers, enabled = state.accountEmail != null && !state.busy) { Text("Buscar") }
+                Button(
+                    onClick = vm::publishCharacter,
+                    enabled = state.accountEmail != null && !state.busy,
+                ) { Text("Ofertar meu personagem") }
+
+                OutlinedButton(
+                    onClick = vm::loadOffers,
+                    enabled = state.accountEmail != null && !state.busy,
+                ) { Text("Buscar jogadores") }
+            }
+
+            if (state.accountEmail == null) {
+                Text(
+                    "Conecte uma conta Google no Perfil para usar o mercado entre jogadores.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
-        items(state.offers, key = { it.ownerUid }) { offer -> RentalOfferCard(offer, state, vm) }
+
+        items(state.offers, key = { it.ownerUid }) { offer ->
+            RentalOfferCard(offer, state, vm)
+        }
     }
 }
 
@@ -737,3 +899,118 @@ private fun ResearchNode(skill: SkillDefinition, owned: Set<String>, level: Int,
         }
     }
 }
+
+
+
+// V11_PREMIUM_CHARACTER_STORE
+@Composable
+fun PremiumCharacterStoreButton(
+    viewModel: ExpansionViewModel = hiltViewModel(),
+) {
+    var open by rememberSaveable { mutableStateOf(false) }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("💎 PERSONAGENS PREMIUM", fontWeight = FontWeight.Black)
+            Text(
+                "Especialistas permanentes, caros e com bônus fortes. Eles não saem na roleta.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("ABRIR LOJA DE PERSONAGENS")
+            }
+        }
+    }
+
+    if (open) {
+        val state by viewModel.uiState.collectAsStateWithLifecycle()
+        Dialog(
+            onDismissRequest = { open = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { open = false }) { Text("← Voltar") }
+                        Text(
+                            "Loja • Personagens",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    HorizontalDivider()
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        item {
+                            Text(
+                                "Compras permanentes • premium não aparece na roleta e não faz parte do aluguel entre jogadores.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        items(
+                            ExpansionCatalog.gachaCharacters.filter { ExpansionCatalog.isPremiumCharacter(it) },
+                            key = { it.id },
+                        ) { character ->
+                            val owned = character.id in state.expansion.ownedCharacters
+                            val price = ExpansionCatalog.premiumCharacterPriceCents(character.id)
+
+                            ElevatedCard {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(
+                                        "${if (character.rarity == Rarity.LEGENDARY) "🌟" else "💎"} ${character.name}",
+                                        fontWeight = FontWeight.Black,
+                                    )
+                                    Text(character.description)
+                                    Text(
+                                        "${character.rarity.label} • nível ${character.minLevel} • ${money(price)}",
+                                        fontWeight = FontWeight.Bold,
+                                    )
+
+                                    if (owned) {
+                                        Button(
+                                            onClick = { viewModel.equipCharacter(character.id) },
+                                            enabled = state.expansion.equippedCharacter != character.id && !state.busy,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(if (state.expansion.equippedCharacter == character.id) "ATIVO" else "ATIVAR")
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { viewModel.buyPremiumCharacter(character.id) },
+                                            enabled = !state.busy &&
+                                                state.companyLevel >= character.minLevel &&
+                                                state.cashCents >= price,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(
+                                                when {
+                                                    state.companyLevel < character.minLevel -> "LIBERA NÍVEL ${character.minLevel}"
+                                                    state.cashCents < price -> "FALTAM ${money((price - state.cashCents).coerceAtLeast(0L))}"
+                                                    else -> "COMPRAR • ${money(price)}"
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

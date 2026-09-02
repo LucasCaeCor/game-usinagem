@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.data.repository
+import br.com.usinagemmaster.data.preferences.WorkLifeRepository
 import br.com.usinagemmaster.domain.expansion.ContractProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionProgression
 
@@ -43,7 +44,8 @@ class GameRepositoryImpl @Inject constructor(
     private val goalDao: GoalDao,
     private val legendaryMissionDao: LegendaryMissionDao,
     private val gamePreferences: GamePreferences,
-    private val expansionRepository: ExpansionRepository
+    private val expansionRepository: ExpansionRepository,
+    private val workLifeRepository: WorkLifeRepository
 ) : GameRepository {
 
     private val simulationMutex = Mutex()
@@ -225,14 +227,33 @@ class GameRepositoryImpl @Inject constructor(
         val machines = machineDao.getAll()
         val employees = employeeDao.getAll()
         val workforce = gamePreferences.workforce.first()
-        val expansion = expansionRepository.snapshot()
-        val snapshot = calculateProduction(machines, employees, workforce, expansion)
-        val elapsedHours = elapsedMillis / 3_600_000.0
-        val elapsedMinutes = elapsedMillis / 60_000L
+                val expansion = expansionRepository.snapshot()
+        // V11_WORK_LIFE_SIMULATION
+        val workLife = workLifeRepository.snapshot()
+        val simulationStart = (eventTime - elapsedMillis.coerceAtLeast(0L)).coerceAtLeast(0L)
+        val workSlice = workLifeRepository.slice(simulationStart, eventTime, workLife.mode)
 
-        val producedUnits = snapshot.totalUnitsPerHour * elapsedHours
+        // No turno 12h, o relógio do contrato NÃO corre enquanto a equipe está em casa.
+        if (workSlice.pausedMillis > 0L) {
+            contractDao.getActive().forEach { active ->
+                contractDao.update(active.copy(deadlineAt = active.deadlineAt + workSlice.pausedMillis))
+            }
+        }
+
+        val productiveEmployees = employees.filterNot { workLife.isResting(it.id, eventTime) }
+        val snapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
+        val activeWorkerIds = productiveEmployees
+            .filter { it.assignedMachineId != null }
+            .map { it.id }
+            .toMutableList()
+            .apply { if (machines.isNotEmpty()) add(WorkLifeRepository.PLAYER_ID) }
+
+        val exhaustionMultiplier = workLifeRepository.productivityMultiplier(workLife, activeWorkerIds)
+        val elapsedHours = workSlice.workMillis / 3_600_000.0
+        val elapsedMinutes = workSlice.workMillis / 60_000L
+        val producedUnits = snapshot.totalUnitsPerHour * elapsedHours * exhaustionMultiplier
         val passiveNet = EconomyBalance.boostedProfit(
-            (snapshot.netPerHourCents * elapsedHours).toLong().coerceAtLeast(0)
+            (snapshot.netPerHourCents * elapsedHours * exhaustionMultiplier).toLong().coerceAtLeast(0)
         )
         var contractRewards = 0L
         var completedContracts = 0
@@ -361,6 +382,9 @@ class GameRepositoryImpl @Inject constructor(
                 )
             )
         }
+
+        // V11_WORK_LIFE_ADVANCE
+        workLifeRepository.advance(employees, workSlice, eventTime)
 
         return SimulationResult(totalEarned, producedUnits, completedContracts)
     }

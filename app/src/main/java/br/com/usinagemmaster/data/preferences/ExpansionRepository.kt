@@ -115,6 +115,11 @@ class ExpansionRepository @Inject constructor(
         context.expansionDataStore.edit { prefs ->
             val tickets = prefs[Keys.tickets] ?: 5
             require(tickets > 0) { "Você não tem fichas da roleta" }
+
+            val ownedCharacters = prefs[Keys.ownedCharacters] ?: emptySet()
+            val ownedSkins = prefs[Keys.ownedSkins] ?: emptySet()
+            val ownedMachines = prefs[Keys.premiumMachines] ?: emptySet()
+
             val epicPity = (prefs[Keys.pityEpic] ?: 0) + 1
             val legendaryPity = (prefs[Keys.pityLegendary] ?: 0) + 1
             val forcedLegendary = legendaryPity >= 80
@@ -122,20 +127,21 @@ class ExpansionRepository @Inject constructor(
             val roll = Random.nextInt(10_000)
 
             val reward = when {
-                forcedLegendary -> legendaryReward(companyLevel)
-                forcedEpic -> epicOrBetterReward(companyLevel)
-                roll < 80 -> legendaryReward(companyLevel)                 // 0,8%
-                roll < 450 -> epicOrBetterReward(companyLevel)             // +3,7%
-                roll < 1_050 -> randomPremiumMachine(companyLevel)          // +6,0%
-                roll < 2_250 -> randomCharacter(companyLevel)               // +12%
-                roll < 4_050 -> randomSkin(companyLevel)                    // +18%
-                roll < 6_450 -> randomTool(Rarity.RARE)                     // +24%
-                roll < 8_050 -> randomTool(Rarity.COMMON)                   // +16%
-                else -> GachaReward("ticket", null, "Ficha bônus da roleta", Rarity.COMMON)
+                forcedLegendary -> legendaryReward(companyLevel, ownedSkins, ownedMachines)
+                forcedEpic -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines)
+                roll < 80 -> legendaryReward(companyLevel, ownedSkins, ownedMachines)
+                roll < 450 -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines)
+                roll < 1_250 -> randomPremiumMachine(companyLevel, ownedMachines)
+                roll < 3_050 -> randomCharacter(companyLevel, ownedCharacters)
+                    ?: randomTool(Rarity.RARE)
+                roll < 5_250 -> randomSkin(companyLevel, ownedSkins)
+                roll < 7_650 -> randomTool(Rarity.RARE)
+                else -> randomTool(Rarity.COMMON)
             }
 
             applyReward(prefs, reward)
-            prefs[Keys.tickets] = (prefs[Keys.tickets] ?: tickets) - 1
+            prefs[Keys.tickets] = tickets - 1
+
             if (reward.rarity == Rarity.LEGENDARY) {
                 prefs[Keys.pityLegendary] = 0
                 prefs[Keys.pityEpic] = 0
@@ -146,6 +152,7 @@ class ExpansionRepository @Inject constructor(
                 prefs[Keys.pityEpic] = epicPity
                 prefs[Keys.pityLegendary] = legendaryPity
             }
+
             result = reward
         }
         return result ?: error("Falha ao sortear recompensa")
@@ -220,6 +227,54 @@ class ExpansionRepository @Inject constructor(
             throw error
         }
     }
+
+    suspend fun buyPremiumCharacter(id: String, companyLevel: Int) {
+        val def = ExpansionCatalog.gachaCharacters.firstOrNull { it.id == id }
+            ?: error("Personagem premium inválido")
+        require(ExpansionCatalog.isPremiumCharacter(def)) {
+            "Esse personagem pertence à roleta comum"
+        }
+        require(companyLevel >= def.minLevel) {
+            "Esse personagem libera no nível ${def.minLevel}"
+        }
+
+        val state = snapshot()
+        require(id !in state.ownedCharacters) {
+            "Você já possui esse personagem premium"
+        }
+
+        val price = ExpansionCatalog.premiumCharacterPriceCents(id)
+        require(price > 0L) { "Preço do personagem não configurado" }
+
+        val company = companyDao.get() ?: error("Empresa não inicializada")
+        require(company.cashCents >= price) {
+            "Caixa insuficiente para contratar esse especialista permanentemente"
+        }
+
+        context.expansionDataStore.edit { prefs ->
+            prefs[Keys.ownedCharacters] = (prefs[Keys.ownedCharacters] ?: emptySet()) + id
+        }
+
+        try {
+            companyDao.upsert(company.copy(cashCents = company.cashCents - price))
+            financeDao.insert(
+                FinancialTransactionEntity(
+                    UUID.randomUUID().toString(),
+                    "EXPENSE",
+                    "SALARY",
+                    price,
+                    "Compra de personagem premium: ${def.name}",
+                    System.currentTimeMillis(),
+                )
+            )
+        } catch (error: Throwable) {
+            context.expansionDataStore.edit { prefs ->
+                prefs[Keys.ownedCharacters] = (prefs[Keys.ownedCharacters] ?: emptySet()) - id
+            }
+            throw error
+        }
+    }
+
 
     suspend fun contractAccess(difficulty: Int, companyLevel: Int): ContractAccess {
         val state = snapshot()
@@ -312,22 +367,28 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
         remoteHireEndsAt = prefs[Keys.remoteEndsAt] ?: 0L,
     )
 
-    private fun randomSkin(level: Int): GachaReward {
-        val gachaSkins = ExpansionCatalog.skins.filter { it.gachaOnly }
-        val pool = gachaSkins.filter { it.minLevel <= level + 5 }
-        val def = (pool.ifEmpty { gachaSkins }).random()
+    private fun randomSkin(level: Int, owned: Set<String>): GachaReward {
+        val all = ExpansionCatalog.skins.filter { it.gachaOnly && it.id !in owned }
+        val pool = all.filter { it.minLevel <= level + 5 }
+        val def = (pool.ifEmpty { all }).randomOrNull()
+            ?: return randomTool(Rarity.RARE)
         return GachaReward("skin", def.id, def.name, def.rarity)
     }
 
-    private fun randomCharacter(level: Int): GachaReward {
-        val pool = ExpansionCatalog.gachaCharacters.filter { it.minLevel <= level + 4 }
-        val def = (pool.ifEmpty { ExpansionCatalog.gachaCharacters.take(1) }).random()
+    private fun randomCharacter(level: Int, owned: Set<String>): GachaReward? {
+        val standard = ExpansionCatalog.gachaCharacters.filter {
+            !ExpansionCatalog.isPremiumCharacter(it) && it.id !in owned
+        }
+        val pool = standard.filter { it.minLevel <= level + 4 }
+        val def = (pool.ifEmpty { standard }).randomOrNull() ?: return null
         return GachaReward("character", def.id, def.name, def.rarity)
     }
 
-    private fun randomPremiumMachine(level: Int): GachaReward {
-        val pool = ExpansionCatalog.premiumMachines.filter { it.minLevel <= level + 4 }
-        val def = (pool.ifEmpty { ExpansionCatalog.premiumMachines.take(1) }).random()
+    private fun randomPremiumMachine(level: Int, owned: Set<String>): GachaReward {
+        val all = ExpansionCatalog.premiumMachines.filter { it.id !in owned }
+        val pool = all.filter { it.minLevel <= level + 4 }
+        val def = (pool.ifEmpty { all }).randomOrNull()
+            ?: return randomTool(Rarity.RARE)
         return GachaReward("machine", def.id, def.name, def.rarity)
     }
 
@@ -337,42 +398,72 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
         return GachaReward("tool", def.id, def.name, def.rarity)
     }
 
-    private fun epicOrBetterReward(level: Int): GachaReward = if (Random.nextInt(100) < 18) legendaryReward(level) else {
+    private fun epicOrBetterReward(
+        level: Int,
+        ownedSkins: Set<String>,
+        ownedMachines: Set<String>,
+    ): GachaReward {
+        if (Random.nextInt(100) < 18) return legendaryReward(level, ownedSkins, ownedMachines)
+
         val candidates = buildList {
-            addAll(ExpansionCatalog.skins.filter { it.rarity.ordinal >= Rarity.EPIC.ordinal }.map { GachaReward("skin", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.tools.filter { it.rarity.ordinal >= Rarity.EPIC.ordinal }.map { GachaReward("tool", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.gachaCharacters.filter { it.rarity.ordinal >= Rarity.EPIC.ordinal && it.minLevel <= level + 5 }.map { GachaReward("character", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.premiumMachines.filter { it.minLevel <= level + 5 }.map { GachaReward("machine", it.id, it.name, it.rarity) })
+            addAll(
+                ExpansionCatalog.skins
+                    .filter { it.gachaOnly && it.rarity == Rarity.EPIC && it.id !in ownedSkins }
+                    .map { GachaReward("skin", it.id, it.name, it.rarity) }
+            )
+            addAll(
+                ExpansionCatalog.tools
+                    .filter { it.rarity == Rarity.EPIC }
+                    .map { GachaReward("tool", it.id, it.name, it.rarity) }
+            )
+            addAll(
+                ExpansionCatalog.premiumMachines
+                    .filter { it.rarity == Rarity.EPIC && it.minLevel <= level + 5 && it.id !in ownedMachines }
+                    .map { GachaReward("machine", it.id, it.name, it.rarity) }
+            )
         }
-        candidates.filter { it.rarity == Rarity.EPIC }.ifEmpty { candidates }.random()
+
+        return candidates.randomOrNull() ?: randomTool(Rarity.RARE)
     }
 
-    private fun legendaryReward(level: Int): GachaReward {
+    private fun legendaryReward(
+        level: Int,
+        ownedSkins: Set<String>,
+        ownedMachines: Set<String>,
+    ): GachaReward {
         val candidates = buildList {
-            addAll(ExpansionCatalog.skins.filter { it.rarity == Rarity.LEGENDARY }.map { GachaReward("skin", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.tools.filter { it.rarity == Rarity.LEGENDARY }.map { GachaReward("tool", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.gachaCharacters.filter { it.rarity == Rarity.LEGENDARY && it.minLevel <= level + 6 }.map { GachaReward("character", it.id, it.name, it.rarity) })
-            addAll(ExpansionCatalog.premiumMachines.filter { it.rarity == Rarity.LEGENDARY && it.minLevel <= level + 6 }.map { GachaReward("machine", it.id, it.name, it.rarity) })
+            addAll(
+                ExpansionCatalog.skins
+                    .filter { it.gachaOnly && it.rarity == Rarity.LEGENDARY && it.id !in ownedSkins }
+                    .map { GachaReward("skin", it.id, it.name, it.rarity) }
+            )
+            addAll(
+                ExpansionCatalog.tools
+                    .filter { it.rarity == Rarity.LEGENDARY }
+                    .map { GachaReward("tool", it.id, it.name, it.rarity) }
+            )
+            addAll(
+                ExpansionCatalog.premiumMachines
+                    .filter { it.rarity == Rarity.LEGENDARY && it.minLevel <= level + 6 && it.id !in ownedMachines }
+                    .map { GachaReward("machine", it.id, it.name, it.rarity) }
+            )
         }
-        return candidates.random()
+        return candidates.randomOrNull() ?: randomTool(Rarity.EPIC)
     }
 
     private fun applyReward(prefs: MutablePreferences, reward: GachaReward) {
         when (reward.type) {
             "skin" -> {
                 val current = prefs[Keys.ownedSkins] ?: emptySet()
-                if (reward.id in current) prefs[Keys.tickets] = (prefs[Keys.tickets] ?: 5) + 1
-                else prefs[Keys.ownedSkins] = current + requireNotNull(reward.id)
+                reward.id?.let { prefs[Keys.ownedSkins] = current + it }
             }
             "machine" -> {
                 val current = prefs[Keys.premiumMachines] ?: emptySet()
-                if (reward.id in current) prefs[Keys.tickets] = (prefs[Keys.tickets] ?: 5) + 1
-                else prefs[Keys.premiumMachines] = current + requireNotNull(reward.id)
+                reward.id?.let { prefs[Keys.premiumMachines] = current + it }
             }
             "character" -> {
                 val current = prefs[Keys.ownedCharacters] ?: emptySet()
-                if (reward.id in current) prefs[Keys.tickets] = (prefs[Keys.tickets] ?: 5) + 1
-                else prefs[Keys.ownedCharacters] = current + requireNotNull(reward.id)
+                reward.id?.let { prefs[Keys.ownedCharacters] = current + it }
             }
             "tool" -> {
                 val counts = parseCounts(prefs[Keys.tools] ?: emptySet()).toMutableMap()
@@ -380,7 +471,6 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
                 counts[id] = (counts[id] ?: 0) + 1
                 prefs[Keys.tools] = encodeCounts(counts)
             }
-            "ticket" -> prefs[Keys.tickets] = (prefs[Keys.tickets] ?: 5) + 2 // +2 e depois o giro desconta 1 = ganho líquido +1
         }
     }
 

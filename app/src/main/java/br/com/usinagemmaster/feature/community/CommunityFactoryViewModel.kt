@@ -19,18 +19,29 @@ data class CommunityFactoryUiState(
 )
 
 @HiltViewModel
-class CommunityFactoryViewModel @Inject constructor(private val service: CommunityFactoryService) : ViewModel() {
+class CommunityFactoryViewModel @Inject constructor(
+    private val service: CommunityFactoryService,
+) : ViewModel() {
     private val _state = MutableStateFlow(CommunityFactoryUiState())
     val state = _state.asStateFlow()
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(busy = true, error = null) }
         runCatching {
-            runCatching { service.publishMine() }
+            service.publishMine()
             service.list()
-        }.onSuccess { list -> _state.update { it.copy(factories = list, busy = false) } }
-            .onFailure { e -> _state.update { it.copy(busy = false, error = e.message ?: "Falha ao abrir a comunidade") } }
+        }.onSuccess { list ->
+            _state.update { it.copy(factories = list, busy = false) }
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    busy = false,
+                    error = error.message ?: "Falha ao abrir outras fábricas",
+                )
+            }
+        }
     }
+
     fun select(factory: CommunityFactory) { _state.update { it.copy(selected = factory) } }
     fun backToList() { _state.update { it.copy(selected = null) } }
 }
