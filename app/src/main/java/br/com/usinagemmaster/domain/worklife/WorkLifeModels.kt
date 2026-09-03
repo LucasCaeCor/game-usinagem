@@ -17,6 +17,7 @@ data class WorkSlice(
     val workMillis: Long,
     val pausedMillis: Long,
 ) {
+    val totalMillis: Long get() = workMillis + pausedMillis
     val workHours: Double get() = workMillis / 3_600_000.0
     val pausedHours: Double get() = pausedMillis / 3_600_000.0
 }
@@ -69,7 +70,29 @@ data class WorkLifeState(
 
     fun statusText(now: Long = System.currentTimeMillis()): String = when {
         mode == FactoryScheduleMode.CONTINUOUS_24H -> "🟢 Operação 24h • exaustão ativa"
-        factoryOpen(now) -> "🟢 Turno aberto • equipe trabalhando até 19:00"
-        else -> "🏠 Turno encerrado • equipe em casa • contratos pausados"
+        factoryOpen(now) -> "🟢 Turno aberto • equipe trabalha até 19:00"
+        else -> "🏠 Fábrica fechada • equipe em casa • contratos pausados"
+    }
+
+    fun nextScheduleChangeMillis(now: Long = System.currentTimeMillis()): Long? {
+        if (mode == FactoryScheduleMode.CONTINUOUS_24H) return null
+        val cal = Calendar.getInstance().apply { timeInMillis = now }
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val next = (cal.clone() as Calendar).apply {
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (hour < 7) {
+                set(Calendar.HOUR_OF_DAY, 7)
+                set(Calendar.MINUTE, 0)
+            } else if (hour < 19) {
+                set(Calendar.HOUR_OF_DAY, 19)
+                set(Calendar.MINUTE, 0)
+            } else {
+                add(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 7)
+                set(Calendar.MINUTE, 0)
+            }
+        }
+        return next.timeInMillis
     }
 }

@@ -37,6 +37,7 @@ import java.util.Locale
 import kotlin.math.sin
 import br.com.usinagemmaster.feature.expansion.ExpansionHomeMenu
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import br.com.usinagemmaster.feature.machines.WorkLifeHomeCard
 
 private data class DashboardAction(val title: String, val subtitle: String, val route: String, val icon: ImageVector)
 
@@ -78,6 +79,11 @@ LaunchedEffect(Unit) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+        // V15_3_WORKLIFE_HOME_CARD
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+            WorkLifeHomeCard()
+        }
+
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
                 Column {
                     Text("USINAGEM MASTER", style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.ExtraBold)

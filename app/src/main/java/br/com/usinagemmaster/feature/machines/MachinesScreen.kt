@@ -77,6 +77,11 @@ fun MachinesScreen(
     }
     val machines by vm.machines.collectAsStateWithLifecycle()
     val employees by vm.employees.collectAsStateWithLifecycle()
+    // V15_3_WORKLIFE_STATE
+    val v15WorkLifeVm: WorkLifeViewModel = hiltViewModel()
+    val v15WorkLife by v15WorkLifeVm.state.collectAsState()
+    var v15ShowCopa by remember { mutableStateOf(false) }
+
     val production by vm.production.collectAsStateWithLifecycle()
     val dashboard by vm.dashboard.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -170,6 +175,15 @@ fun MachinesScreen(
                 // EXPANSION_LAUNCHER_V2
                 ExpansionLauncherCard(onOpen = { expansionHubVisible.value = true })
                 }
+                // V15_3_WORKLIFE_FACTORY_CARD
+                item {
+                    WorkLifeFactoryCard(
+                        employees = employees,
+                        onOpenCopa = { v15ShowCopa = true },
+                        vm = v15WorkLifeVm,
+                    )
+                }
+
                 item {
                     FactoryActionRow(
                         engagement = engagement,
@@ -178,7 +192,7 @@ fun MachinesScreen(
                         onMinigame = { showMinigame = true },
                         onDailyReward = { showDailyReward = true },
                         onAccelerate = vm::accelerateProduction,
-                        onCopa = { showCopa = true }
+                        onCopa = { v15ShowCopa = true }
                     )
                 }
                 item {
@@ -203,8 +217,8 @@ fun MachinesScreen(
                     item {
                         FactoryLiveSceneStudio(
                             machines = machines,
-                            employees = employees,
-                            production = production.machineProduction,
+                            employees = employees.filter { v15WorkLife.workerOnFloor(it.id) },
+                            production = if (v15WorkLife.factoryOpen()) production.machineProduction else emptyList(),
                             soundEnabled = settings.sound,
                             speechEnabled = settings.npcSpeech,
                             speechDurationSeconds = settings.speechDurationSeconds,
@@ -287,7 +301,7 @@ fun MachinesScreen(
                         Box(Modifier.fillMaxWidth().weight(1f)) {
                             WarehouseLayout(
                                 machines = machines,
-                                employees = employees,
+                                employees = employees.filter { v15WorkLife.workerOnFloor(it.id) },
                                 production = production.machineProduction,
                                 onMove = vm::move,
                                 onSelect = { manageId = it.id }
@@ -376,6 +390,19 @@ fun MachinesScreen(
             dismissButton = { TextButton(onClick = { showSnackConfirm = false }) { Text("Cancelar") } }
         )
     }
+
+    // V15_3_REAL_COPA_DIALOG
+    if (v15ShowCopa) {
+        WorkLifeCopaDialog(
+            employees = employees,
+            state = v15WorkLife,
+            onMode = v15WorkLifeVm::setMode,
+            onDismiss = { v15ShowCopa = false },
+            onRest = v15WorkLifeVm::rest,
+            onReturn = v15WorkLifeVm::returnToWork,
+            onAutoRest = v15WorkLifeVm::setAutoRest,
+        )
+    }
 }
 
 private fun machineDisplayNameV5(machine: MachineEntity): String {
@@ -387,33 +414,73 @@ private fun machineDisplayNameV5(machine: MachineEntity): String {
 
 @Composable
 private fun FactoryExperienceTitle(active: Int, waiting: Int) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF111C22),
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp,
+        border = BorderStroke(1.dp, Color(0xFF5DE0A0).copy(alpha = .24f))
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "Chão de fábrica",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "$active em produção • $waiting aguardando • pinça para zoom",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = Color(0xFF56DF99).copy(alpha = .10f),
-            border = BorderStroke(1.dp, Color(0xFF56DF99).copy(alpha = .38f))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("●", color = Color(0xFF56DF99), style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.width(5.dp))
-                Text("AO VIVO", color = Color(0xFF8AF1B7), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF19352D),
+                border = BorderStroke(1.dp, Color(0xFF5DE0A0).copy(alpha = .34f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🏭", style = MaterialTheme.typography.titleLarge)
+                }
+            }
+
+            Spacer(Modifier.width(11.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "CENTRAL DE PRODUÇÃO",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "$active máquinas produzindo • $waiting aguardando",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFC7D4D9)
+                )
+                Text(
+                    "Role a tela normalmente • use dois dedos para explorar o galpão",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF82969E)
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0xFF56DF99).copy(alpha = .11f),
+                border = BorderStroke(1.dp, Color(0xFF56DF99).copy(alpha = .40f))
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("●", color = Color(0xFF56DF99))
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "AO VIVO",
+                        color = Color(0xFF91F2BC),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black
+                    )
+                }
             }
         }
     }
@@ -422,44 +489,99 @@ private fun FactoryExperienceTitle(active: Int, waiting: Int) {
 @Composable
 private fun FactoryHud(dashboard: DashboardStatus, boostTokens: Int) {
     Surface(
-        color = Color(0xFF0A1116),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF091217),
         tonalElevation = 4.dp,
         shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .32f))
+        border = BorderStroke(1.dp, Color.White.copy(alpha = .10f))
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .65f))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${dashboard.companyLevel}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.width(5.dp))
-                    Text("NÍVEL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "PAINEL DA OPERAÇÃO",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF8EA4AD)
+                    )
+                    Text(
+                        "Fábrica nível ${dashboard.companyLevel}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = Color(0xFFFFC247).copy(alpha = .10f),
+                    border = BorderStroke(1.dp, Color(0xFFFFC247).copy(alpha = .30f))
+                ) {
+                    Text(
+                        "⚡ $boostTokens impulsos",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = Color(0xFFFFD36A),
+                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
             }
 
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("CAIXA", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(Formatters.money(dashboard.cashCents), fontWeight = FontWeight.Black, color = Color(0xFF6BE7A0))
-            }
-
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF15222A),
-                border = BorderStroke(1.dp, Color(0xFFFFB21A).copy(alpha = .35f))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("⚡", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.width(4.dp))
-                    Column {
-                        Text(boostTokens.toString(), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Text("IMPULSOS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(15.dp),
+                    color = Color(0xFF10241D),
+                    border = BorderStroke(1.dp, Color(0xFF62E3A2).copy(alpha = .24f))
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(
+                            "CAIXA DISPONÍVEL",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF92A9B1),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            Formatters.money(dashboard.cashCents),
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF73EAAF),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(.72f),
+                    shape = RoundedCornerShape(15.dp),
+                    color = Color(0xFF121D24),
+                    border = BorderStroke(1.dp, Color(0xFF65BCEB).copy(alpha = .22f))
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(
+                            "STATUS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF92A9B1),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "FÁBRICA VIVA",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
                 }
             }
@@ -528,47 +650,109 @@ private fun FactoryMachineQuickCard(
     onManage: () -> Unit,
     onClear: () -> Unit
 ) {
-    val title = machineDisplayNameV5(machine)
+    val title = MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType
     val operating = production?.isOperating == true
     val statusColor = if (operating) Color(0xFF61E3A0) else Color(0xFFE9B84C)
+
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = Color(0xFF101A1F),
-        border = BorderStroke(1.dp, Color(0xFFFFC64D).copy(alpha = .24f))
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF0E181D),
+        shadowElevation = 6.dp,
+        border = BorderStroke(1.dp, statusColor.copy(alpha = .28f))
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Surface(
-                modifier = Modifier.size(42.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = statusColor.copy(alpha = .10f),
-                border = BorderStroke(1.dp, statusColor.copy(alpha = .34f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.PrecisionManufacturing, null, tint = statusColor)
+                MachineArtworkV17(
+                    label = title,
+                    machineType = machine.machineType,
+                    modifier = Modifier
+                        .width(112.dp)
+                        .height(78.dp)
+                )
+
+                Spacer(Modifier.width(11.dp))
+
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(statusColor, RoundedCornerShape(99.dp))
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (operating) "PRODUZINDO" else "AGUARDANDO",
+                            color = statusColor,
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+
+                    Text(
+                        title,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2
+                    )
+
+                    Text(
+                        "Conservação ${machine.condition}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFFC4D1D6)
+                    )
+
+                    Text(
+                        employee?.let { "👷 ${it.name}" } ?: "⚠ Sem operador",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (employee != null) Color(0xFF9FC9DD) else Color(0xFFFFC66A),
+                        maxLines = 1
+                    )
+                }
+
+                TextButton(
+                    onClick = onClear,
+                    contentPadding = PaddingValues(7.dp)
+                ) {
+                    Text("×", color = Color.White)
                 }
             }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1)
-                Text(
-                    "${if (operating) "Produzindo" else "Em espera"} • conservação ${machine.condition}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor
-                )
-                Text(
-                    employee?.let { "Operador: ${it.name}" } ?: "Sem operador atribuído",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-            TextButton(onClick = onClear, contentPadding = PaddingValues(6.dp)) { Text("×") }
-            Button(onClick = onManage, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                Text("Gerenciar")
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(11.dp),
+                    color = statusColor.copy(alpha = .08f),
+                    border = BorderStroke(1.dp, statusColor.copy(alpha = .20f))
+                ) {
+                    Text(
+                        if (operating) "Linha ativa e gerando produção" else "Aguardando condição de operação",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        color = Color(0xFFD1DDE1),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+
+                Button(
+                    onClick = onManage,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text("GERENCIAR", fontWeight = FontWeight.Black)
+                }
             }
         }
     }

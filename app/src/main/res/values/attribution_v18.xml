@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- V18: precisa resolver literalmente para string vazia. -->
+    <string name="v18_empty_attribution_tag"></string>
+    <string name="v18_attribution_label">Usinagem Master</string>
+</resources>

@@ -21,6 +21,7 @@ import br.com.usinagemmaster.core.designsystem.component.StatusPill
 import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.domain.catalog.LegendaryEmployeeCatalog
 import br.com.usinagemmaster.data.local.entity.LegendaryMissionEntity
+import br.com.usinagemmaster.feature.machines.WorkLifeEmployeeSection
 
 @Composable
 fun EmployeesScreen(vm: EmployeesViewModel = hiltViewModel()) {
@@ -58,6 +59,9 @@ fun EmployeesScreen(vm: EmployeesViewModel = hiltViewModel()) {
             contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+        // V15_3_EMPLOYEE_FATIGUE
+        item { WorkLifeEmployeeSection(employees = employees) }
+
             item {
                 ScreenHeader(
                     "Funcionários",

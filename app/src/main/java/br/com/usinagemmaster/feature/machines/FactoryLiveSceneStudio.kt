@@ -1,4 +1,5 @@
 package br.com.usinagemmaster.feature.machines
+// V17_FACTORY_VISUAL_POLISH — portrait Compose, sem engine externa
 
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
@@ -101,9 +102,9 @@ fun FactoryLiveSceneStudio(
     // A cena se adapta à altura real do aparelho. Em celulares menores, evita
     // transformar a Fábrica Viva em um bloco de 620dp que empurra todo o resto para baixo.
     val sceneHeight = when {
-        configuration.screenHeightDp <= 680 -> 380.dp
-        configuration.screenHeightDp <= 760 -> 410.dp
-        configuration.screenHeightDp <= 860 -> 455.dp
+        configuration.screenHeightDp <= 680 -> 405.dp
+        configuration.screenHeightDp <= 760 -> 435.dp
+        configuration.screenHeightDp <= 860 -> 475.dp
         configuration.screenHeightDp <= 980 -> 500.dp
         else -> 540.dp
     }
@@ -564,12 +565,12 @@ private fun studioIsoPoint(layout: StudioLayout, gridX: Int, gridY: Int): Offset
 private fun DrawScope.studioBackdrop(layout: StudioLayout, pulse: Float, slow: Float) {
     drawRect(
         brush = Brush.verticalGradient(
-            listOf(Color(0xFF1E2A30), Color(0xFF111A1F), Color(0xFF080D10)),
+            listOf(Color(0xFF263941), Color(0xFF14242B), Color(0xFF071116)),
             startY = 0f,
             endY = layout.height
         )
     )
-    drawRect(Color(0xFF202A2F), topLeft = Offset.Zero, size = Size(layout.width, layout.wallBottom))
+    drawRect(Color(0xFF2A3940), topLeft = Offset.Zero, size = Size(layout.width, layout.wallBottom))
 
     // Chapas da parede e juntas verticais.
     repeat(8) { i ->

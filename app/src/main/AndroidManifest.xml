@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application
+    
+    <!-- V18_EMPTY_ATTRIBUTION
+         O AppOps está requisitando uma attributionTag vazia.
+         O recurso abaixo resolve para string vazia sem usar android:tag="". -->
+    <attribution
+        android:tag="@string/v18_empty_attribution_tag"
+        android:label="@string/v18_attribution_label" />
+
+<application
         android:name=".UsinagemMasterApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

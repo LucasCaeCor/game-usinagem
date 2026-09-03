@@ -2,7 +2,6 @@ package br.com.usinagemmaster.data.preferences
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -20,7 +19,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToInt
 
-private val Context.workLifeDataStore by preferencesDataStore(name = "work_life_v11")
+private val Context.workLifeDataStore by preferencesDataStore(name = "work_life_v15")
 
 @Singleton
 class WorkLifeRepository @Inject constructor(
@@ -28,7 +27,8 @@ class WorkLifeRepository @Inject constructor(
 ) {
     companion object {
         const val PLAYER_ID = "__main_player__"
-        private const val BREAK_MILLIS = 2L * 60L * 60L * 1000L
+        const val BREAK_MILLIS = 2L * 60L * 60L * 1000L
+        private const val AUTO_REST_AT = 88
     }
 
     private object Keys {
@@ -67,8 +67,8 @@ class WorkLifeRepository @Inject constructor(
     }
 
     /**
-     * Em 12h, apenas 07:00–19:00 entra como tempo produtivo.
-     * O restante é pausa real: sem produção e sem consumir prazo de contrato.
+     * No modo 12h somente 07:00–19:00 é tempo produtivo.
+     * O restante é tempo pausado e será devolvido ao prazo do contrato.
      */
     fun slice(startMillis: Long, endMillis: Long, mode: FactoryScheduleMode): WorkSlice {
         if (endMillis <= startMillis) return WorkSlice(0L, 0L)
@@ -77,6 +77,7 @@ class WorkLifeRepository @Inject constructor(
 
         var cursor = startMillis
         var work = 0L
+
         while (cursor < endMillis) {
             val cal = Calendar.getInstance().apply { timeInMillis = cursor }
             val hour = cal.get(Calendar.HOUR_OF_DAY)
@@ -85,13 +86,14 @@ class WorkLifeRepository @Inject constructor(
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
-                if (hour < 7) {
-                    set(Calendar.HOUR_OF_DAY, 7)
-                } else if (hour < 19) {
-                    set(Calendar.HOUR_OF_DAY, 19)
-                } else {
-                    add(Calendar.DAY_OF_MONTH, 1)
-                    set(Calendar.HOUR_OF_DAY, 7)
+
+                when {
+                    hour < 7 -> set(Calendar.HOUR_OF_DAY, 7)
+                    hour < 19 -> set(Calendar.HOUR_OF_DAY, 19)
+                    else -> {
+                        add(Calendar.DAY_OF_MONTH, 1)
+                        set(Calendar.HOUR_OF_DAY, 7)
+                    }
                 }
             }.timeInMillis.coerceAtLeast(cursor + 1L)
 
@@ -99,21 +101,29 @@ class WorkLifeRepository @Inject constructor(
             if (hour in 7..18) work += segmentEnd - cursor
             cursor = segmentEnd
         }
-        return WorkSlice(workMillis = work, pausedMillis = (total - work).coerceAtLeast(0L))
+
+        return WorkSlice(
+            workMillis = work,
+            pausedMillis = (total - work).coerceAtLeast(0L),
+        )
     }
 
-    fun productivityMultiplier(
-        state: WorkLifeState,
-        activeIds: Collection<String>,
-    ): Double {
+    fun productivityMultiplier(state: WorkLifeState, activeIds: Collection<String>): Double {
         if (activeIds.isEmpty()) return 1.0
         return activeIds.map(state::efficiency).average().coerceIn(0.35, 1.0)
     }
 
     /**
-     * Atualiza a exaustão sem mexer no Room. Em 12h, o período fora do
-     * expediente recupera energia. Em 24h a exaustão cresce mais rápido.
-     * Trabalhadores enviados à Copa recuperam energia agressivamente.
+     * Atualiza cansaço individual.
+     *
+     * 12h:
+     * - trabalhando no turno: cansa;
+     * - fora do turno: recupera em casa.
+     *
+     * 24h:
+     * - cansa mais rápido;
+     * - funcionários na Copa recuperam rapidamente;
+     * - auto descanso opcional ao chegar em 88%.
      */
     suspend fun advance(
         employees: List<EmployeeEntity>,
@@ -121,40 +131,53 @@ class WorkLifeRepository @Inject constructor(
         eventTime: Long,
     ) {
         val before = snapshot()
-        val workHours = slice.workHours
-        val homeHours = slice.pausedHours
+        val startTime = (eventTime - slice.totalMillis).coerceAtLeast(0L)
 
         context.workLifeDataStore.edit { prefs ->
             val fatigue = parseIntMap(prefs[Keys.fatigue]).toMutableMap()
             val resting = parseLongMap(prefs[Keys.resting]).toMutableMap()
-            resting.entries.removeAll { it.value <= eventTime }
-
             val allIds = employees.map { it.id } + PLAYER_ID
+
             allIds.forEach { id ->
-                val current = (fatigue[id] ?: 0).toDouble()
-                val restingNow = (before.restingUntil[id] ?: 0L) > eventTime
                 val employee = employees.firstOrNull { it.id == id }
-                val activelyAssigned = id == PLAYER_ID || employee?.assignedMachineId != null
+                val assigned = id == PLAYER_ID || employee?.assignedMachineId != null
+                val oldFatigue = (fatigue[id] ?: 0).toDouble()
+
+                val restUntil = before.restingUntil[id] ?: 0L
+                val restOverlapMillis = if (restUntil > startTime) {
+                    (minOf(eventTime, restUntil) - startTime).coerceAtLeast(0L)
+                        .coerceAtMost(slice.workMillis)
+                } else 0L
+
+                val restHours = restOverlapMillis / 3_600_000.0
+                val effectiveWorkHours = (slice.workHours - restHours).coerceAtLeast(0.0)
 
                 val workDelta = when {
-                    restingNow -> -34.0 * workHours
-                    before.mode == FactoryScheduleMode.CONTINUOUS_24H && activelyAssigned -> 6.5 * workHours
-                    before.mode == FactoryScheduleMode.CONTINUOUS_24H -> 3.0 * workHours
-                    activelyAssigned -> 4.0 * workHours
-                    else -> 1.5 * workHours
+                    !assigned -> 1.2 * effectiveWorkHours
+                    before.mode == FactoryScheduleMode.CONTINUOUS_24H -> 6.5 * effectiveWorkHours
+                    else -> 4.0 * effectiveWorkHours
                 }
-                val homeDelta = -8.5 * homeHours
-                val next = (current + workDelta + homeDelta).roundToInt().coerceIn(0, 100)
+
+                val homeRecovery = 8.5 * slice.pausedHours
+                val copaRecovery = 28.0 * restHours
+                val next = (oldFatigue + workDelta - homeRecovery - copaRecovery)
+                    .roundToInt()
+                    .coerceIn(0, 100)
+
                 fatigue[id] = next
 
-                if (before.mode == FactoryScheduleMode.CONTINUOUS_24H &&
+                if (
+                    before.mode == FactoryScheduleMode.CONTINUOUS_24H &&
                     before.autoRest &&
-                    next >= 88 &&
+                    assigned &&
+                    next >= AUTO_REST_AT &&
                     (resting[id] ?: 0L) <= eventTime
                 ) {
                     resting[id] = eventTime + BREAK_MILLIS
                 }
             }
+
+            resting.entries.removeAll { it.value <= eventTime }
 
             prefs[Keys.fatigue] = encodeIntMap(fatigue)
             prefs[Keys.resting] = encodeLongMap(resting)
@@ -170,14 +193,16 @@ class WorkLifeRepository @Inject constructor(
 
     private fun parseIntMap(raw: String?): Map<String, Int> =
         raw.orEmpty().split("|").mapNotNull { token ->
-            val p = token.lastIndexOf('=')
-            if (p <= 0) null else token.substring(0, p) to (token.substring(p + 1).toIntOrNull() ?: 0)
+            val pos = token.lastIndexOf('=')
+            if (pos <= 0) null
+            else token.substring(0, pos) to (token.substring(pos + 1).toIntOrNull() ?: 0)
         }.toMap()
 
     private fun parseLongMap(raw: String?): Map<String, Long> =
         raw.orEmpty().split("|").mapNotNull { token ->
-            val p = token.lastIndexOf('=')
-            if (p <= 0) null else token.substring(0, p) to (token.substring(p + 1).toLongOrNull() ?: 0L)
+            val pos = token.lastIndexOf('=')
+            if (pos <= 0) null
+            else token.substring(0, pos) to (token.substring(pos + 1).toLongOrNull() ?: 0L)
         }.toMap()
 
     private fun encodeIntMap(values: Map<String, Int>): String =

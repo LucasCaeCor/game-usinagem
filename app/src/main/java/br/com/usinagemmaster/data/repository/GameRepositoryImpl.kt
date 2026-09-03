@@ -32,6 +32,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
 import kotlin.random.Random
+import br.com.usinagemmaster.domain.worklife.WorkLifeState
 
 @Singleton
 class GameRepositoryImpl @Inject constructor(
@@ -67,9 +68,22 @@ class GameRepositoryImpl @Inject constructor(
         )
     }
 
-    override fun production(): Flow<ProductionSnapshot> = combine(
-        machineDao.observeAll(), employeeDao.observeAll(), gamePreferences.workforce, expansionRepository.state
-    ) { machines, employees, workforce, expansion -> calculateProduction(machines, employees, workforce, expansion) }
+    // V15_WORKLIFE_PRODUCTION_FLOW
+override fun production(): Flow<ProductionSnapshot> = combine(
+    machineDao.observeAll(),
+    employeeDao.observeAll(),
+    gamePreferences.workforce,
+    expansionRepository.state,
+    workLifeRepository.state,
+) { machines, employees, workforce, expansion, workLife ->
+    val now = System.currentTimeMillis()
+    val availableEmployees = if (workLife.factoryOpen(now)) {
+        employees.filterNot { workLife.isResting(it.id, now) }
+    } else emptyList()
+
+    val base = calculateProduction(machines, availableEmployees, workforce, expansion)
+    applyWorkLifeToSnapshot(base, workLife)
+}
 
     override fun machines() = machineDao.observeAll()
     override fun employees() = employeeDao.observeAll()
@@ -162,6 +176,11 @@ class GameRepositoryImpl @Inject constructor(
     override suspend fun accelerateProduction10Minutes(): Result<Long> = runCatching {
         simulationMutex.withLock {
             val company = companyDao.get() ?: error("Empresa não inicializada")
+            // V15_ACCELERATION_SCHEDULE_GUARD
+            val workLife = workLifeRepository.snapshot()
+            require(workLife.factoryOpen()) {
+                "Fábrica fechada no turno 12h. O próximo expediente começa às 07:00."
+            }
             val snapshot = calculateProduction(machineDao.getAll(), employeeDao.getAll(), gamePreferences.workforce.first(), expansionRepository.snapshot())
             require(snapshot.operatingMachines > 0) { "Nenhuma máquina está produzindo agora" }
 
@@ -227,21 +246,33 @@ class GameRepositoryImpl @Inject constructor(
         val machines = machineDao.getAll()
         val employees = employeeDao.getAll()
         val workforce = gamePreferences.workforce.first()
-                val expansion = expansionRepository.snapshot()
-        // V11_WORK_LIFE_SIMULATION
+        val expansion = expansionRepository.snapshot()
+
+        // V15_WORKLIFE_SIMULATION
         val workLife = workLifeRepository.snapshot()
         val simulationStart = (eventTime - elapsedMillis.coerceAtLeast(0L)).coerceAtLeast(0L)
-        val workSlice = workLifeRepository.slice(simulationStart, eventTime, workLife.mode)
 
-        // No turno 12h, o relógio do contrato NÃO corre enquanto a equipe está em casa.
+        val workSlice = workLifeRepository.slice(
+            startMillis = simulationStart,
+            endMillis = eventTime,
+            mode = workLife.mode,
+        )
+
+        // No turno 12h somente 07:00–19:00 consome prazo.
+        // O período fechado é devolvido ao deadline do contrato.
         if (workSlice.pausedMillis > 0L) {
             contractDao.getActive().forEach { active ->
-                contractDao.update(active.copy(deadlineAt = active.deadlineAt + workSlice.pausedMillis))
+                contractDao.update(
+                    active.copy(
+                        deadlineAt = active.deadlineAt + workSlice.pausedMillis
+                    )
+                )
             }
         }
 
         val productiveEmployees = employees.filterNot { workLife.isResting(it.id, eventTime) }
-        val snapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
+
+val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
         val activeWorkerIds = productiveEmployees
             .filter { it.assignedMachineId != null }
             .map { it.id }
@@ -249,6 +280,7 @@ class GameRepositoryImpl @Inject constructor(
             .apply { if (machines.isNotEmpty()) add(WorkLifeRepository.PLAYER_ID) }
 
         val exhaustionMultiplier = workLifeRepository.productivityMultiplier(workLife, activeWorkerIds)
+        val snapshot = applyWorkLifeToSnapshot(baseSnapshot, workLife)
         val elapsedHours = workSlice.workMillis / 3_600_000.0
         val elapsedMinutes = workSlice.workMillis / 60_000L
         val producedUnits = snapshot.totalUnitsPerHour * elapsedHours * exhaustionMultiplier
@@ -266,17 +298,24 @@ class GameRepositoryImpl @Inject constructor(
                 val currentMilli = contract.productionProgressMilli.coerceAtMost(targetMilli)
                 val needed = (targetMilli - currentMilli).coerceAtLeast(0)
                 val toolEffect = expansion.toolEffectForContract(contract.id)
-            val effectiveQuality = (snapshot.averageQuality + toolEffect.qualityBonus).coerceIn(0, 100)
-            val qualityGap = contract.requiredQuality - effectiveQuality
+                val effectiveQuality =
+                    (snapshot.averageQuality + toolEffect.qualityBonus).coerceIn(0, 100)
+                val qualityGap = contract.requiredQuality - effectiveQuality
                 val qualityFactor = when {
                     qualityGap <= 0 -> 1.0
                     qualityGap <= 10 -> 0.70
                     else -> 0.30
                 }
-                val acceptedAvailable = (productionMilli * qualityFactor * toolEffect.speedMultiplier).toLong()
+                val acceptedAvailable =
+                    (productionMilli * qualityFactor * toolEffect.speedMultiplier).toLong()
                 val applied = min(acceptedAvailable, needed)
                 val effectiveFactor = qualityFactor * toolEffect.speedMultiplier
-            val rawConsumed = if (effectiveFactor <= 0.0) productionMilli else kotlin.math.ceil(applied / effectiveFactor).toLong()
+                val rawConsumed =
+                    if (effectiveFactor <= 0.0) {
+                        productionMilli
+                    } else {
+                        kotlin.math.ceil(applied / effectiveFactor).toLong()
+                    }
                 val newProgress = currentMilli + applied
                 productionMilli = (productionMilli - rawConsumed).coerceAtLeast(0)
 
@@ -292,9 +331,16 @@ class GameRepositoryImpl @Inject constructor(
                             "Contrato concluído pela produção: ${contract.clientName}"
                         )
                     )
-                    if (paidNow) contractRewards += contract.rewardCents
-            // V7_XP_AUTO_CONTRACT
-            if (paidNow) expansionRepository.addPlayerXp(ContractProgression.characterXp(contract))
+
+                    if (paidNow) {
+                        contractRewards += contract.rewardCents
+
+                        // V7_XP_AUTO_CONTRACT
+                        expansionRepository.addPlayerXp(
+                            ContractProgression.characterXp(contract)
+                        )
+                    }
+
                     completedContracts++
                 } else {
                     contractDao.update(
@@ -383,13 +429,44 @@ class GameRepositoryImpl @Inject constructor(
             )
         }
 
-        // V11_WORK_LIFE_ADVANCE
-        workLifeRepository.advance(employees, workSlice, eventTime)
+        // V15_WORKLIFE_ADVANCE
+        workLifeRepository.advance(
+            employees = employees,
+            slice = workSlice,
+            eventTime = eventTime,
+        )
 
         return SimulationResult(totalEarned, producedUnits, completedContracts)
     }
 
-    private fun calculateProduction(
+    
+    // V15_APPLY_EXHAUSTION
+    private fun applyWorkLifeToSnapshot(
+        snapshot: ProductionSnapshot,
+        state: WorkLifeState,
+    ): ProductionSnapshot {
+        val adjustedMachines = snapshot.machineProduction.map { machine ->
+            val multiplier = when (val employeeId = machine.employeeId) {
+                null -> 1.0
+                else -> if (state.isResting(employeeId)) 0.0 else state.efficiency(employeeId)
+            }
+            machine.copy(unitsPerHour = machine.unitsPerHour * multiplier)
+        }
+        val adjustedUnits = adjustedMachines.filter { it.isOperating }.sumOf { it.unitsPerHour }
+        val ratio = if (snapshot.totalUnitsPerHour > 0.0) {
+            (adjustedUnits / snapshot.totalUnitsPerHour).coerceIn(0.0, 1.0)
+        } else 0.0
+        val adjustedGross = (snapshot.grossPerHourCents * ratio).toLong()
+        val adjustedEnergy = snapshot.energyPerHourCents
+        return snapshot.copy(
+            totalUnitsPerHour = adjustedUnits,
+            grossPerHourCents = adjustedGross,
+            netPerHourCents = (adjustedGross - adjustedEnergy).coerceAtLeast(0L),
+            machineProduction = adjustedMachines,
+        )
+    }
+
+private fun calculateProduction(
         machines: List<MachineEntity>,
         employees: List<EmployeeEntity>,
         workforce: WorkforceState = WorkforceState(),

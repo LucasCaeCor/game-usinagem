@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import br.com.usinagemmaster.core.designsystem.component.ScreenHeader
 import br.com.usinagemmaster.core.util.Formatters
+import br.com.usinagemmaster.feature.machines.MachineArtworkV17
 
 @Composable
 fun StoreScreen(vm: StoreViewModel = hiltViewModel()) {
@@ -52,6 +53,8 @@ fun StoreScreen(vm: StoreViewModel = hiltViewModel()) {
                 items(vm.catalog) { machine ->
                     Card {
                         Column(Modifier.padding(16.dp)) {
+                            // V17_MACHINE_CATALOG_ART
+                            MachineArtworkV17(label = machine.name)
                             Text(machine.name, fontWeight = FontWeight.Bold)
                             Text("${String.format("%.1f", machine.baseProductionPerHour / 6.0)} un/10 min • Qualidade ${machine.quality} • ${machine.space} m²")
                             Text("Consumo ${machine.powerKw} kW", style = MaterialTheme.typography.bodySmall)
