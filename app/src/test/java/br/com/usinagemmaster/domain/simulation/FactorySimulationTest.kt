@@ -131,9 +131,22 @@ class FactorySimulationTest {
     @Test fun fatigueChangesWalkingSpeedIndividually() {
         val rested = engine()
         val tired = engine(input.copy(workers = listOf(worker.copy(fatigue = 95))))
+        val start = rested.snapshot().workers.single().position
         val a = run(rested, 1).workers.single().position
         val b = run(tired, 1).workers.single().position
-        assertTrue(a.distanceTo(FactoryFloor.ENTRY.point()) > b.distanceTo(FactoryFloor.ENTRY.point()))
+        assertTrue(a.distanceTo(start) > b.distanceTo(start))
+    }
+
+    @Test fun employeesStartAtSeparateBaysAndHaveSeparateBreakSeats() {
+        val secondMachine = machine.copy(id = "mill", gridX = 3)
+        val secondWorker = worker.copy(id = "bia", machineId = secondMachine.id)
+        val setup = FactoryInput(listOf(machine, secondMachine), listOf(worker, secondWorker))
+        val engine = engine(setup)
+        assertEquals(2, engine.snapshot().workers.map { it.position }.distinct().size)
+        engine.update(setup.copy(workers = setup.workers.map { it.copy(resting = true) }))
+        val frame = run(engine, 90)
+        assertTrue(frame.workers.all { it.activity == WorkerActivity.BREAK })
+        assertEquals(2, frame.workers.map { it.position }.distinct().size)
     }
 
     @Test fun reorderedInputsDoNotRestartTasks() {

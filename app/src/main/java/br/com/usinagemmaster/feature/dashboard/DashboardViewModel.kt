@@ -26,6 +26,8 @@ class DashboardViewModel @Inject constructor(
         DashboardStatus()
     )
 
+    val pendingCargo = repo.pendingCargo().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
     private var lastPresenceAt = 0L
 

@@ -1,4 +1,6 @@
 package br.com.usinagemmaster.data.repository
+import androidx.room.withTransaction
+import br.com.usinagemmaster.data.local.database.GameDatabase
 import br.com.usinagemmaster.data.preferences.WorkLifeRepository
 import br.com.usinagemmaster.domain.expansion.ContractProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionProgression
@@ -38,6 +40,8 @@ import kotlin.random.Random
 
 @Singleton
 class GameRepositoryImpl @Inject constructor(
+    private val database: GameDatabase,
+    private val cargoDao: ProductionCargoDao,
     private val companyDao: CompanyDao,
     private val machineDao: MachineDao,
     private val employeeDao: EmployeeDao,
@@ -102,6 +106,12 @@ class GameRepositoryImpl @Inject constructor(
                 ContractProgression.minLevel(contract.difficulty) <= level
         }
     }
+    override fun pendingCargo() = cargoDao.observePending()
+
+    override suspend fun deliverCargo(ids: List<String>): Result<Long> = runCatching {
+        simulationMutex.withLock { cargoDao.deliver(ids, System.currentTimeMillis()) }
+    }
+
     override fun finances() = financeDao.observeRecent()
     override fun facilities() = facilityDao.observeAll()
     override fun goals() = goalDao.observeAll()
@@ -144,14 +154,15 @@ class GameRepositoryImpl @Inject constructor(
             elapsedMillis = settled,
             eventTime = now,
             lastSimulationAtAfter = lastSimulationAfter,
-            summaryDescription = "Produção offline • ${settled / SimulationCadence.CYCLE_MILLIS} ciclo(s) de 10 min"
+            expectedSimulationAt = company.lastSimulationAt,
         )
         generateContractsIfNeeded()
         return OfflineReport(
             minutes = settled / 60_000L,
             earnedCents = result.earnedCents,
             producedUnits = result.producedUnits,
-            completedContracts = result.completedContracts
+            completedContracts = result.completedContracts,
+            stagedCargoCents = result.stagedCents,
         )
     }
 
@@ -167,7 +178,7 @@ class GameRepositoryImpl @Inject constructor(
                 elapsedMillis = settled,
                 eventTime = now,
                 lastSimulationAtAfter = company.lastSimulationAt + settled,
-                summaryDescription = "Fechamento da produção • ${settled / SimulationCadence.CYCLE_MILLIS} ciclo(s) de 10 min"
+                expectedSimulationAt = company.lastSimulationAt,
             )
         }
     
@@ -191,9 +202,9 @@ class GameRepositoryImpl @Inject constructor(
                 eventTime = System.currentTimeMillis(),
                 // O impulso é bônus: não altera o relógio do fechamento normal.
                 lastSimulationAtAfter = company.lastSimulationAt,
-                summaryDescription = "Impulso de produção • +10 min instantâneos • ganhos 3x"
+                expectedSimulationAt = company.lastSimulationAt,
             )
-            result.earnedCents
+            result.stagedCents
         }
     }
 
@@ -235,16 +246,18 @@ class GameRepositoryImpl @Inject constructor(
     private data class SimulationResult(
         val earnedCents: Long,
         val producedUnits: Double,
-        val completedContracts: Int
+        val completedContracts: Int,
+        val stagedCents: Long = 0L,
     )
 
     private suspend fun simulateProduction(
         elapsedMillis: Long,
         eventTime: Long,
         lastSimulationAtAfter: Long,
-        summaryDescription: String?
-    ): SimulationResult {
-        val company = companyDao.get() ?: return SimulationResult(0, 0.0, 0)
+        expectedSimulationAt: Long,
+    ): SimulationResult = database.withTransaction {
+        val company = companyDao.get() ?: return@withTransaction SimulationResult(0, 0.0, 0)
+        if (company.lastSimulationAt != expectedSimulationAt) return@withTransaction SimulationResult(0, 0.0, 0)
         val machines = machineDao.getAll()
         val employees = employeeDao.getAll()
         val workforce = gamePreferences.workforce.first()
@@ -398,32 +411,32 @@ class GameRepositoryImpl @Inject constructor(
             }
         }
 
-        val totalEarned = passiveNet + contractRewards
+        val totalEarned = contractRewards
 
         // settleReward() pode ter atualizado caixa/reputação dentro de uma transação Room.
-        // Releia a empresa antes de aplicar produção passiva/multas para não sobrescrever
+        // Releia a empresa antes de aplicar multas para não sobrescrever
         // o prêmio recém-creditado com uma cópia antiga da CompanyEntity.
         val latestCompany = companyDao.get() ?: company
         val newReputation = (latestCompany.reputation - reputationLoss).coerceAtLeast(0)
         val newLevel = (1 + newReputation / 20).coerceAtLeast(latestCompany.companyLevel)
         companyDao.upsert(
             latestCompany.copy(
-                cashCents = (latestCompany.cashCents + passiveNet - penalties).coerceAtLeast(0),
+                cashCents = (latestCompany.cashCents - penalties).coerceAtLeast(0),
                 reputation = newReputation,
                 companyLevel = newLevel,
                 lastSimulationAt = lastSimulationAtAfter
             )
         )
 
-        if (summaryDescription != null && passiveNet > 0) {
-            financeDao.insert(
-                transaction(
-                    TransactionType.INCOME,
-                    TransactionCategory.PRODUCTION,
-                    passiveNet,
-                    summaryDescription
-                )
-            )
+        if (producedUnits > 0.0 || passiveNet > 0L) {
+            val id = if (lastSimulationAtAfter == company.lastSimulationAt) "boost:${UUID.randomUUID()}"
+                else "cycle:${company.lastSimulationAt}:$lastSimulationAtAfter"
+            cargoDao.insert(ProductionCargoEntity(
+                id = id, valueCents = passiveNet,
+                unitsMilli = (producedUnits * 1000.0).toLong().coerceAtLeast(0L),
+                cycles = (elapsedMillis / SimulationCadence.CYCLE_MILLIS).coerceAtLeast(1L),
+                createdAt = eventTime,
+            ))
         }
 
         // V15_WORKLIFE_ADVANCE
@@ -433,7 +446,7 @@ class GameRepositoryImpl @Inject constructor(
             eventTime = eventTime,
         )
 
-        return SimulationResult(totalEarned, producedUnits, completedContracts)
+        SimulationResult(totalEarned, producedUnits, completedContracts, passiveNet)
     }
 
     

@@ -9,7 +9,8 @@ data class OfflineReport(
     val minutes: Long,
     val earnedCents: Long,
     val producedUnits: Double = 0.0,
-    val completedContracts: Int = 0
+    val completedContracts: Int = 0,
+    val stagedCargoCents: Long = 0L,
 )
 
 interface GameRepository {
@@ -22,6 +23,8 @@ interface GameRepository {
     fun facilities(): Flow<List<FacilityUpgradeEntity>>
     fun goals(): Flow<List<GoalEntity>>
     fun legendaryMissions(): Flow<List<LegendaryMissionEntity>>
+    fun pendingCargo(): Flow<List<ProductionCargoEntity>>
+    suspend fun deliverCargo(ids: List<String>): Result<Long>
 
     suspend fun initialize(): OfflineReport?
     suspend fun tickProduction()

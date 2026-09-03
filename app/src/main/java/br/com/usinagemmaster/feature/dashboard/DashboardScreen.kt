@@ -45,6 +45,7 @@ private data class DashboardAction(val title: String, val subtitle: String, val 
 fun DashboardScreen(vm: DashboardViewModel = hiltViewModel(), onNavigate: (String) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val production by vm.production.collectAsStateWithLifecycle()
+    val pendingCargo by vm.pendingCargo.collectAsStateWithLifecycle()
     val playerProfile by vm.playerProfile.collectAsStateWithLifecycle()
 
     
@@ -140,6 +141,17 @@ LaunchedEffect(Unit) {
 
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
                 SettlementCountdownCard(state.lastSimulationAt, production.netPer10MinutesCents)
+            }
+            if (pendingCargo.isNotEmpty()) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+                    Card(onClick = { onNavigate("machines") }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("Carga pronta para entregar", fontWeight = FontWeight.Bold)
+                            Text(Formatters.money(pendingCargo.sumOf { it.valueCents }), style = MaterialTheme.typography.titleLarge)
+                            Text("Vá ao galpão e leve a carga à expedição para receber.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
             }
 
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
@@ -273,11 +285,11 @@ private fun SettlementCountdownCard(lastSimulationAt: Long, nextProfitCents: Lon
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("PRÓXIMO FECHAMENTO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                Text("PRÓXIMA CARGA", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                 Text(String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("estimativa", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("valor na entrega", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("+${Formatters.money(nextProfitCents)}", fontWeight = FontWeight.ExtraBold, color = Color.White)
             }
         }

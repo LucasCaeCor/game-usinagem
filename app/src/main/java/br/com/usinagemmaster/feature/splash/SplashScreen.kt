@@ -36,7 +36,11 @@ fun SplashScreen(vm: SplashViewModel = hiltViewModel(), onContinue: () -> Unit) 
                                 Spacer(Modifier.height(6.dp))
                                 Text("Tempo calculado: ${Formatters.duration(report.minutes)}")
                                 Text("Produção: ${String.format(Locale.getDefault(), "%.1f", report.producedUnits)} peças")
-                                Text("Resultado: +${Formatters.money(report.earnedCents)}")
+                                Text("Recebido: +${Formatters.money(report.earnedCents)}")
+                                if (report.stagedCargoCents > 0L) {
+                                    Text("Carga para entregar: ${Formatters.money(report.stagedCargoCents)}", color = MaterialTheme.colorScheme.primary)
+                                    Text("Retire no galpão para receber o valor da produção.")
+                                }
                                 if (report.completedContracts > 0) {
                                     Text("Contratos concluídos: ${report.completedContracts}", color = MaterialTheme.colorScheme.primary)
                                 }

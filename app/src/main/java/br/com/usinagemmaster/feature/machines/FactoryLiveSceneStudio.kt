@@ -1,5 +1,5 @@
 package br.com.usinagemmaster.feature.machines
-// Fábrica Viva 2.0 — renderização dos estados operacionais do domínio
+// Fábrica Viva 2.1 — projeção em fileiras para telas verticais
 
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -64,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.usinagemmaster.data.local.entity.EmployeeEntity
 import br.com.usinagemmaster.core.designsystem.component.drawPlayerAvatarFigure
+import br.com.usinagemmaster.data.local.entity.ProductionCargoEntity
 import br.com.usinagemmaster.data.local.entity.MachineEntity
 import br.com.usinagemmaster.domain.catalog.LegendaryEmployeeCatalog
 import br.com.usinagemmaster.domain.catalog.EmployeeVisualCatalog
@@ -98,6 +100,9 @@ fun FactoryLiveSceneStudio(
     machines: List<MachineEntity>,
     employees: List<EmployeeEntity>,
     factoryFrame: State<FactoryFrame>,
+    pendingCargo: State<List<ProductionCargoEntity>>,
+    delivering: Boolean,
+    onDeliver: () -> Unit,
     production: List<MachineProduction>,
     soundEnabled: Boolean,
     speechEnabled: Boolean,
@@ -144,6 +149,8 @@ fun FactoryLiveSceneStudio(
     var reprimandTargetId by remember { mutableStateOf<String?>(null) }
     var ownerRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
     val latestReprimand by rememberUpdatedState(onReprimand)
+    val latestDeliver by rememberUpdatedState(onDeliver)
+    val deliveryBusy by rememberUpdatedState(delivering)
     val reprimandProgress = remember { Animatable(0f) }
     val minZoom = .78f
     val maxZoom = 3.25f
@@ -154,7 +161,13 @@ fun FactoryLiveSceneStudio(
         FactoryFloor(machines.map { FactoryMachineInput(it.id, it.gridX, it.gridY, it.installed) })
     }
 
-    LaunchedEffect(reprimandTargetId, sceneFloor) {
+    LaunchedEffect(reprimandTargetId, sceneFloor, delivering) {
+        if (delivering) {
+            reprimandTargetId = null
+            ownerRoute = listOf(FactoryFloor.ENTRY.point())
+            reprimandProgress.snapTo(0f)
+            return@LaunchedEffect
+        }
         val target = reprimandTargetId ?: return@LaunchedEffect
         val worker = factoryFrame.value.workers.firstOrNull { it.id == target }
         if (worker == null) {
@@ -183,17 +196,22 @@ fun FactoryLiveSceneStudio(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF090F12)),
         border = BorderStroke(1.dp, Color(0xFF53626A).copy(alpha = .58f))
     ) {
+        StudioLiveHeader(Modifier.fillMaxWidth().padding(10.dp), factoryFrame)
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(sceneHeight)
+                .clipToBounds()
                 .background(Brush.verticalGradient(listOf(Color(0xFF182329), Color(0xFF0B1115))))
         ) {
             val widthPx = with(density) { maxWidth.toPx() }
             val heightPx = with(density) { sceneHeight.toPx() }
-            val tileW = min(widthPx / 6.05f, with(density) { 108.dp.toPx() })
-            val tileH = tileW * .50f
-            val sceneVisualScale = (tileW / 70f).coerceIn(1.12f, 2.8f)
+            val occupiedRows = (machines.maxOfOrNull { it.gridY + 1 } ?: 3).coerceIn(3, 6)
+            val layout = remember(widthPx, heightPx, occupiedRows) {
+                StudioLayout(widthPx, heightPx, occupiedRows)
+            }
+            val sceneVisualScale = layout.projection.machineScale
+            val workerScale = layout.projection.workerScale
             val center = Offset(widthPx / 2f, heightPx / 2f)
 
             val clampPan: (Offset, Float) -> Offset = { candidate, targetZoom ->
@@ -215,18 +233,15 @@ fun FactoryLiveSceneStudio(
                         transformOrigin = TransformOrigin.Center
                     }
             ) {
-                val layout = StudioLayout(size.width, size.height, tileW, tileH)
                 val visualScale = sceneVisualScale
-
-                studioBackdrop(layout, pulse, logisticsPhase)
-                studioArchitecture(layout, logisticsPhase, pulse)
+                studioPortraitBuilding(layout, pulse)
                 studioFloor(layout)
-                studioServiceLane(layout)
-                studioWallProps(layout, pulse)
 
                 val frame = factoryFrame.value
                 val states = frame.machines.associateBy { it.id }
-                studioStations(layout, visualScale)
+                studioStations(layout, workerScale)
+                val waitingCargo = pendingCargo.value.count { it.id !in frame.cargoInTransit }
+                studioCargoDock(layout, frame.depositedLots, waitingCargo, pulse)
                 frame.workers.firstOrNull { it.id == selectedWorkerId }?.let { worker ->
                     val route = listOf(worker.position) + worker.route
                     route.zipWithNext().forEach { (a, b) ->
@@ -249,7 +264,6 @@ fun FactoryLiveSceneStudio(
                         val local = (workPhase + Math.floorMod(machine.id.hashCode(), 100) / 100f) % 1f
                         studioMachineBay(point, layout, operating, machine.condition, machine.id == selectedMachineId)
                         studioMachine(point, machine.machineType,
-                            MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType,
                             operating, machine.condition, local, pulse, visualScale)
                         state?.let {
                             studioMachineStatus(point, layout, it.state, it.progress, it.needsMaintenance, visualScale)
@@ -261,30 +275,32 @@ fun FactoryLiveSceneStudio(
                         val working = worker.activity == WorkerActivity.WORKING || worker.activity == WorkerActivity.SETTING_UP
                         val bay = machines.firstOrNull { it.id == worker.machineId }
                         if (worker.id == selectedWorkerId) {
-                            drawOval(Color(0xFF67D9F5).copy(alpha = .65f), point + Offset(-12f, -4f) * visualScale,
-                                Size(24f * visualScale, 8f * visualScale), style = Stroke(2f * visualScale))
+                            drawOval(Color(0xFF67D9F5).copy(alpha = .65f), point + Offset(-12f, -4f) * workerScale,
+                                Size(24f * workerScale, 8f * workerScale), style = Stroke(2f * workerScale))
                         }
                         studioWorker(point, employee, workPhase, worker.walking, worker.carrying,
-                            worker.activity == WorkerActivity.PHONE, visualScale,
+                            worker.activity == WorkerActivity.PHONE, workerScale,
                             workLean = if (working) .35f + pulse * .35f else 0f,
                             armTarget = if (working && bay != null) studioIsoPoint(layout, bay.gridX, bay.gridY) else null)
-                        if (worker.activity == WorkerActivity.PHONE) studioPhoneStatus(point + Offset(0f, -66f * visualScale), visualScale)
-                        if (worker.activity == WorkerActivity.INSPECTING) studioClipboard(point + Offset(12f, -30f) * visualScale, visualScale)
-                        if (worker.activity == WorkerActivity.BREAK) studioText("☕", point.x, point.y - 56f * visualScale,
-                            13f * visualScale, Color(0xFFFFD38A), centered = true, bold = false)
+                        if (worker.activity == WorkerActivity.PHONE) studioPhoneStatus(point + Offset(0f, -66f * workerScale), workerScale)
+                        if (worker.activity == WorkerActivity.INSPECTING) studioClipboard(point + Offset(12f, -30f) * workerScale, workerScale)
+                        if (worker.activity == WorkerActivity.BREAK) studioText("☕", point.x, point.y - 56f * workerScale,
+                            13f * workerScale, Color(0xFFFFD38A), centered = true, bold = false)
                     }
                 }
 
-                val ownerBase = studioWorldPoint(layout, studioRoutePoint(ownerRoute, reprimandProgress.value))
-                drawPlayerAvatarFigure(ownerBase, playerProfile.avatar, visualScale * 1.02f, workPhase,
-                    walking = reprimandProgress.isRunning, carrying = false)
-                studioOwnerBadge(ownerBase + Offset(0f, -56f * visualScale), playerProfile.displayName.ifBlank { "Você" })
-                if (reprimandTargetId != null && reprimandProgress.value > .98f) {
-                    studioSpeechBubble(ownerBase + Offset(0f, -68f * visualScale), "Vamos voltar ao trabalho!")
+                val owner = frame.owner
+                val ownerBase = studioWorldPoint(layout, if (owner.busy) owner.position else studioRoutePoint(ownerRoute, reprimandProgress.value))
+                drawPlayerAvatarFigure(ownerBase, playerProfile.avatar, workerScale * 1.02f, workPhase,
+                    walking = if (owner.busy) owner.walking else reprimandProgress.isRunning, carrying = owner.carrying)
+                if (owner.carrying) studioCargoCart(ownerBase + Offset(-19f, 0f) * workerScale, workerScale)
+                // The owner's name remains in the profile; no floating nameplate over the map.
+                if (!deliveryBusy && reprimandTargetId != null && reprimandProgress.value > .98f) {
+                    studioSpeechBubble(ownerBase + Offset(0f, -68f * workerScale), "Vamos voltar ao trabalho!")
                 }
                 if (speechEnabled) {
                     val speakers = frame.workers.filter {
-                        it.activity != WorkerActivity.OFF_SHIFT && employeesById[it.id]?.legendaryCode != null
+                        it.id == selectedWorkerId && it.activity != WorkerActivity.OFF_SHIFT && employeesById[it.id]?.legendaryCode != null
                     }
                     val now = System.currentTimeMillis()
                     val round = (now / 22000L).toInt()
@@ -292,7 +308,7 @@ fun FactoryLiveSceneStudio(
                         val speaker = speakers[Math.floorMod(round, speakers.size)]
                         LegendaryEmployeeCatalog.quote(employeesById[speaker.id]?.legendaryCode,
                             speaker.activity == WorkerActivity.WORKING, round)?.let { quote ->
-                            studioSpeechBubble(studioWorldPoint(layout, speaker.position) + Offset(0f, -65f * visualScale), quote)
+                            studioSpeechBubble(studioWorldPoint(layout, speaker.position) + Offset(0f, -65f * workerScale), quote)
                         }
                     }
                 }
@@ -307,7 +323,7 @@ fun FactoryLiveSceneStudio(
                     // Zoom e pan da câmera só capturam o gesto quando existem 2+ dedos.
                     // Isso evita que o Canvas "roube" o gesto e impeça o usuário de
                     // chegar aos cards/funcionários abaixo da fábrica.
-                    .pointerInput(Unit) {
+                    .pointerInput(layout) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
                             var event = awaitPointerEvent()
@@ -325,36 +341,43 @@ fun FactoryLiveSceneStudio(
                             }
                         }
                     }
-                    .pointerInput(machines, zoom, pan, widthPx, heightPx) {
+                    .pointerInput(machines, zoom, pan, layout) {
                         detectTapGestures(
                             onDoubleTap = {
                                 zoom = if (zoom < 1.75f) 2.1f else 1f
                                 pan = Offset.Zero
                             },
                             onTap = { tap ->
-                                val layout = StudioLayout(widthPx, heightPx, tileW, tileH)
+                                val worldTap = Offset(
+                                    layout.projection.unproject(tap.x, center.x, zoom, pan.x),
+                                    layout.projection.unproject(tap.y, center.y, zoom, pan.y),
+                                )
 
+                                val dock = studioWorldPoint(layout, FactoryFloor.STAGING.point())
+                                if (studioDistance(worldTap, dock) < maxOf(24f, layout.projection.cellWidth * .45f)
+                                    && pendingCargo.value.isNotEmpty() && !deliveryBusy) {
+                                    latestDeliver()
+                                    return@detectTapGestures
+                                }
                                 val touchedWorker = factoryFrame.value.workers
                                     .filter { it.activity != WorkerActivity.OFF_SHIFT }
                                     .map { worker ->
-                                        val world = studioWorldPoint(layout, worker.position) + Offset(0f, -24f * sceneVisualScale)
-                                        val screen = center + (world - center) * zoom + pan
-                                        worker to studioDistance(tap, screen)
-                                    }.minByOrNull { it.second }?.takeIf { it.second <= 22f * sceneVisualScale * zoom }?.first
+                                        val world = studioWorldPoint(layout, worker.position) + Offset(0f, -24f * workerScale)
+                                        worker to studioDistance(worldTap, world)
+                                    }.minByOrNull { it.second }
+                                    ?.takeIf { it.second <= maxOf(22f * workerScale, layout.projection.cellWidth * .15f) }?.first
                                 if (touchedWorker != null) {
                                     selectedWorkerId = touchedWorker.id
-                                    if (touchedWorker.activity == WorkerActivity.PHONE && reprimandTargetId == null) {
+                                    if (touchedWorker.activity == WorkerActivity.PHONE && reprimandTargetId == null && !deliveryBusy) {
                                         reprimandTargetId = touchedWorker.id
                                     }
                                 } else {
                                     selectedWorkerId = null
-                                    val selected = machines.map { machine ->
-                                        val world = studioIsoPoint(layout, machine.gridX, machine.gridY)
-                                        val screen = center + (world - center) * zoom + pan
-                                        machine to studioDistance(tap, screen)
-                                    }.minByOrNull { it.second }
-                                        ?.takeIf { it.second <= tileW * zoom * .55f }
-                                        ?.first
+                                    val selected = machines.filter { machine ->
+                                        layout.projection.hitsMachine(worldTap.x, worldTap.y, machine.gridX, machine.gridY)
+                                    }.minByOrNull { machine ->
+                                        studioDistance(worldTap, studioIsoPoint(layout, machine.gridX, machine.gridY))
+                                    }
                                     selected?.let(onSelect)
                                 }
                             }
@@ -362,13 +385,8 @@ fun FactoryLiveSceneStudio(
                     }
             )
 
-            StudioLiveHeader(
-                modifier = Modifier.align(Alignment.TopStart).padding(11.dp),
-                frame = factoryFrame,
-            )
-
             StudioZoomControls(
-                modifier = Modifier.align(Alignment.BottomEnd).padding(11.dp),
+                modifier = Modifier.align(Alignment.TopEnd).padding(11.dp),
                 zoom = zoom,
                 onMinus = {
                     zoom = (zoom - .25f).coerceIn(minZoom, maxZoom)
@@ -382,18 +400,42 @@ fun FactoryLiveSceneStudio(
             )
 
         }
-        FactoryOperationsPanel(factoryFrame, employeesById, selectedWorkerId)
+        FactoryOperationsPanel(factoryFrame, employeesById, selectedWorkerId, machines, selectedMachineId)
     }
+}
+
+/** Small physical staging area; the card shows the exact amount and piece count. */
+private fun DrawScope.studioCargoDock(layout: StudioLayout, depositedLots: Int, readyLoads: Int, pulse: Float) {
+    val base = studioWorldPoint(layout, FactoryFloor.STAGING.point())
+    val scale = layout.projection.machineScale
+    val width = 68f * scale
+    drawRoundRect(if (readyLoads > 0) Color(0xFF68DE9A).copy(alpha = .3f + pulse * .25f) else Color(0xFF617A71),
+        base + Offset(-width / 2f, -12f * scale), Size(width, 22f * scale), CornerRadius(4f * scale))
+    repeat(3) { row ->
+        drawLine(Color(0xFFAD8557), base + Offset(-width / 2f, row * 5f * scale),
+            base + Offset(width / 2f, row * 5f * scale), 3f * scale)
+    }
+    val boxes = (readyLoads.coerceAtMost(4) * 2 + depositedLots.coerceAtMost(4)).coerceAtMost(8)
+    repeat(boxes) { box ->
+        val origin = base + Offset((-29f + (box % 4) * 15f) * scale, (-13f - (box / 4) * 13f) * scale)
+        drawRect(if (readyLoads > 0) Color(0xFFE6BA75) else Color(0xFF9B8970), origin, Size(13f * scale, 12f * scale))
+        drawLine(Color(0xFFFFE5AE), origin + Offset(6f * scale, 0f), origin + Offset(6f * scale, 12f * scale), 2f * scale)
+    }
+    studioText("CARGA", base.x, base.y + 24f * scale, 10f * scale, Color(0xFFBEEBD1), centered = true, bold = true)
+}
+
+private fun DrawScope.studioCargoCart(base: Offset, scale: Float) {
+    drawRect(Color(0xFFE6BA75), base + Offset(-16f, -22f) * scale, Size(27f * scale, 18f * scale))
+    drawLine(Color(0xFFB6CAD0), base + Offset(-19f, -3f) * scale, base + Offset(16f, -3f) * scale, 3f * scale)
+    drawLine(Color(0xFFB6CAD0), base + Offset(16f, -3f) * scale, base + Offset(19f, -27f) * scale, 3f * scale)
+    drawCircle(Color(0xFF26343B), 4f * scale, base + Offset(-10f, 1f) * scale)
+    drawCircle(Color(0xFF26343B), 4f * scale, base + Offset(10f, 1f) * scale)
 }
 
 private data class StudioDrawable(val depth: Float, val machine: MachineEntity? = null, val worker: FactoryWorkerFrame? = null)
 
-private fun studioWorldPoint(layout: StudioLayout, point: FloorPoint): Offset {
-    val x = point.x / 4f - .5f
-    val y = point.y / 4f - .5f
-    return Offset(layout.centerX + (x - y) * layout.tileW * .46f,
-        layout.originY + (x + y) * layout.tileH * .49f)
-}
+private fun studioWorldPoint(layout: StudioLayout, point: FloorPoint): Offset =
+    Offset(layout.projection.x(point.x), layout.projection.y(point.y))
 
 private fun studioRoutePoint(route: List<FloorPoint>, progress: Float): FloorPoint {
     if (route.isEmpty()) return FactoryFloor.ENTRY.point()
@@ -407,13 +449,14 @@ private fun studioRoutePoint(route: List<FloorPoint>, progress: Float): FloorPoi
 }
 
 private fun DrawScope.studioStations(layout: StudioLayout, scale: Float) {
-    listOf(FactoryFloor.STOCK to "MATERIAL", FactoryFloor.TOOLS to "FERRAMENTAS",
-        FactoryFloor.INSPECTION to "QUALIDADE", FactoryFloor.SHIPPING to "EXPEDIÇÃO",
-        FactoryFloor.BREAK_ROOM to "COPA").forEach { (cell, name) ->
+    listOf(FactoryFloor.STOCK to "M", FactoryFloor.TOOLS to "F",
+        FactoryFloor.INSPECTION to "Q", FactoryFloor.SHIPPING to "E",
+        FactoryFloor.BREAK_ROOM to "C").forEach { (cell, name) ->
         val point = studioWorldPoint(layout, cell.point())
-        drawCircle(Color(0xFF162D35), 11f * scale, point)
-        drawCircle(Color(0xFF77C5CD).copy(alpha = .65f), 11f * scale, point, style = Stroke(1f * scale))
-        studioText(name, point.x, point.y + 20f * scale, 6.5f * scale, Color(0xFFCAE5E6), true, true)
+        val radius = layout.projection.cellWidth * .16f
+        drawCircle(Color(0xFF162D35), radius, point)
+        drawCircle(Color(0xFF77C5CD).copy(alpha = .65f), radius, point, style = Stroke(maxOf(1f, scale)))
+        studioText(name, point.x, point.y + radius * .35f, radius * 1.05f, Color(0xFFCAE5E6), true, true)
     }
 }
 
@@ -426,11 +469,12 @@ private fun DrawScope.studioMachineStatus(point: Offset, layout: StudioLayout, s
         FactoryMachineState.WAITING_MATERIAL -> Color(0xFF77CDED)
         else -> Color(0xFF9CAAB3)
     }
-    val label = if (maintenance) "${state.label} • revisar" else state.label
-    val y = point.y + layout.tileH * .42f
-    studioText(label, point.x, y, 6.5f * scale, color, true, true)
+    // A lamp and compact progress bar replace the repeated multi-line labels.
+    val lamp = point + Offset(36f * scale, -35f * scale)
+    drawCircle(color, 3.5f * scale, lamp)
+    if (maintenance) drawCircle(Color(0xFFFFC766), 6f * scale, lamp, style = Stroke(1.5f * scale))
     if (state == FactoryMachineState.RUNNING || state == FactoryMachineState.SETUP) {
-        val left = Offset(point.x - 19f * scale, y + 4f * scale)
+        val left = point + Offset(-19f * scale, 30f * scale)
         drawLine(Color(0xFF20343C), left, left + Offset(38f * scale, 0f), 2.5f * scale, StrokeCap.Round)
         drawLine(color, left, left + Offset(38f * scale * progress, 0f), 2.5f * scale, StrokeCap.Round)
     }
@@ -441,7 +485,7 @@ private fun StudioSimulationAudio(enabled: Boolean, machines: List<MachineEntity
     val audioState by remember(frame) { derivedStateOf {
         frame.value.open to frame.value.machines.filter { it.state == FactoryMachineState.RUNNING }.map { it.id }.toSet()
     } }
-    FactoryAudioLayer(enabled && audioState.first, machines,
+    FactorySimulationAudio(enabled && audioState.first, machines,
         production.map { it.copy(isOperating = it.machineId in audioState.second) })
 }
 
@@ -460,7 +504,8 @@ private data class StudioOperationSummary(
 )
 
 @Composable
-private fun FactoryOperationsPanel(frame: State<FactoryFrame>, employees: Map<String, EmployeeEntity>, selectedId: String?) {
+private fun FactoryOperationsPanel(frame: State<FactoryFrame>, employees: Map<String, EmployeeEntity>, selectedId: String?,
+    machines: List<MachineEntity>, selectedMachineId: String?) {
     val summary by remember(frame, selectedId) { derivedStateOf {
         val workers = frame.value.workers
         val selected = workers.firstOrNull { it.id == selectedId }
@@ -481,6 +526,17 @@ private fun FactoryOperationsPanel(frame: State<FactoryFrame>, employees: Map<St
         } else {
             Text("Toque em um funcionário para acompanhar a tarefa e a rota.", color = Color(0xFFAABBC4), style = MaterialTheme.typography.bodySmall)
         }
+        val focusedMachine = machines.firstOrNull { it.id == selectedMachineId }
+        if (employee == null && focusedMachine != null) {
+            val machineState by remember(frame, selectedMachineId) { derivedStateOf {
+                frame.value.machines.firstOrNull { it.id == selectedMachineId }?.state?.label.orEmpty()
+            } }
+            Text(focusedMachine.customName ?: MachineCatalog.byType(focusedMachine.machineType)?.name ?: focusedMachine.machineType,
+                color = Color.White, style = MaterialTheme.typography.titleSmall)
+            Text(machineState, color = Color(0xFF77CDED), style = MaterialTheme.typography.bodySmall)
+        }
+        Text("M Material • F Ferramentas • Q Qualidade • E Expedição • C Copa",
+            color = Color(0xFF8C9FA9), style = MaterialTheme.typography.labelSmall)
         Text("1 dedo rola a tela • 2 dedos movem e ampliam a fábrica", color = Color(0xFF8C9FA9), style = MaterialTheme.typography.labelSmall)
     }
 }
@@ -500,7 +556,7 @@ private fun StudioSceneHeader(modifier: Modifier, operating: Int, waiting: Int, 
         ) {
             Text("●", color = if (open) Color(0xFF61DEA0) else Color(0xFF9CAAB3), style = MaterialTheme.typography.labelSmall)
             Column {
-                Text("FÁBRICA VIVA 2.0", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                Text("FÁBRICA VIVA 2.1", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
                 Text(if (open) "$operating usinando  •  $waiting em outras etapas" else "Turno encerrado • equipe indo para casa", color = Color(0xFFAAB7BD), style = MaterialTheme.typography.labelSmall)
                 Text("Toque na equipe para seguir a rota", color = Color(0xFF7F949E), style = MaterialTheme.typography.labelSmall)
             }
@@ -566,32 +622,36 @@ private fun DrawScope.studioOwnerBadge(position: Offset, name: String) {
     drawContext.canvas.nativeCanvas.drawText("VOCÊ • $safeName", position.x, position.y + 1f, paint)
 }
 
-private data class StudioLayout(
-    val width: Float,
-    val height: Float,
-    val tileW: Float,
-    val tileH: Float
-) {
-    val wallBottom = height * .255f
-    val floorTop = wallBottom
-    val floorBottom = height * .895f
-    val floorLeft = width * .07f
-    val floorRight = width * .93f
+private data class StudioLayout(val width: Float, val height: Float, val rows: Int) {
+    val projection = FactorySceneGeometry(width, height, rows)
+    val tileW = projection.cellWidth
+    val tileH = projection.cellHeight
+    val wallBottom = height * .10f
+    val floorTop = projection.top
+    val floorBottom = height * .97f
+    val floorLeft = projection.left
+    val floorRight = projection.right
     val centerX = width * .50f
-    val originY = floorTop + tileH * 1.05f
-    val backAisleY = floorTop + tileH * .62f
-    val serviceY = floorBottom - tileH * .15f
-    val serviceLeft = width * .10f
-    val serviceRight = width * .90f
+    val originY = floorTop
+    val backAisleY = floorTop
+    val serviceY = projection.serviceBottom
+    val serviceLeft = floorLeft
+    val serviceRight = floorRight
 }
 
-private fun studioIsoPoint(layout: StudioLayout, gridX: Int, gridY: Int): Offset {
-    val x = gridX.coerceIn(0, 4)
-    val y = gridY.coerceIn(0, 5)
-    return Offset(
-        layout.centerX + (x - y) * layout.tileW * .46f,
-        layout.originY + (x + y) * layout.tileH * .49f
-    )
+private fun studioIsoPoint(layout: StudioLayout, gridX: Int, gridY: Int): Offset =
+    Offset(layout.projection.machineX(gridX), layout.projection.machineY(gridY))
+
+private fun DrawScope.studioPortraitBuilding(layout: StudioLayout, pulse: Float) {
+    drawRect(Brush.verticalGradient(listOf(Color(0xFF26383E), Color(0xFF0B151A))))
+    drawRoundRect(Color(0xFF364B53), Offset(layout.width * .03f, layout.height * .025f),
+        Size(layout.width * .94f, layout.height * .05f), CornerRadius(layout.width * .01f))
+    repeat(5) { index ->
+        val x = layout.floorLeft + (index + .5f) * layout.tileW
+        drawLine(Color(0xFFC1DBD5).copy(alpha = .55f + pulse * .2f),
+            Offset(x - layout.tileW * .23f, layout.height * .05f),
+            Offset(x + layout.tileW * .23f, layout.height * .05f), layout.height * .004f, StrokeCap.Round)
+    }
 }
 
 private fun DrawScope.studioBackdrop(layout: StudioLayout, pulse: Float, slow: Float) {
@@ -676,33 +736,23 @@ private fun DrawScope.studioArchitecture(layout: StudioLayout, phase: Float, pul
 }
 
 private fun DrawScope.studioFloor(layout: StudioLayout) {
-    drawRect(
-        brush = Brush.verticalGradient(listOf(Color(0xFF31383B), Color(0xFF252C2F), Color(0xFF1C2225))),
-        topLeft = Offset(layout.floorLeft, layout.floorTop),
-        size = Size(layout.floorRight - layout.floorLeft, layout.floorBottom - layout.floorTop)
-    )
-
-    // Juntas do concreto.
-    repeat(7) { row ->
-        val y = layout.floorTop + (layout.floorBottom - layout.floorTop) * row / 7f
-        drawLine(Color.Black.copy(alpha = .18f), Offset(layout.floorLeft, y), Offset(layout.floorRight, y), 1.2f)
-    }
-    repeat(6) { col ->
-        val x = layout.floorLeft + (layout.floorRight - layout.floorLeft) * col / 6f
-        drawLine(Color.Black.copy(alpha = .13f), Offset(x, layout.floorTop), Offset(x, layout.floorBottom), 1f)
-    }
-
-    // Corredores de pedestres - bordas, não o miolo.
-    val yellow = Color(0xFFE9B93D).copy(alpha = .72f)
-    drawLine(yellow, Offset(layout.floorLeft + 8f, layout.backAisleY), Offset(layout.floorRight - 8f, layout.backAisleY), 3f)
-    drawLine(yellow, Offset(layout.floorLeft + 8f, layout.serviceY - 17f), Offset(layout.floorRight - 8f, layout.serviceY - 17f), 3f)
-
-    // Marcas discretas de uso.
-    repeat(12) { i ->
-        val x = layout.floorLeft + 26f + (i * 73f) % (layout.floorRight - layout.floorLeft - 52f)
-        val y = layout.floorTop + 70f + (i * 47f) % (layout.floorBottom - layout.floorTop - 100f)
-        drawCircle(Color(0xFF111719).copy(alpha = .18f), 4f + i % 3, Offset(x, y))
-    }
+    drawRoundRect(Color(0xFF202D32), Offset(layout.width * .02f, layout.height * .11f),
+        Size(layout.width * .96f, layout.height * .86f), CornerRadius(layout.width * .02f))
+    // Bay outlines make the free positions readable and use the same projection as the machines.
+    repeat(layout.rows) { row -> repeat(5) { column ->
+        val c = studioIsoPoint(layout, column, row)
+        val w = layout.tileW * .82f
+        val h = layout.tileH * .78f
+        drawRoundRect(Color(0xFF34474F).copy(alpha = .35f), c - Offset(w / 2f, h / 2f),
+            Size(w, h), CornerRadius(w * .08f), style = Stroke(maxOf(1f, w * .015f)))
+    } }
+    val lane = Color(0xFFCEAD56).copy(alpha = .48f)
+    drawLine(lane, Offset(layout.floorLeft, layout.floorTop), Offset(layout.floorLeft, layout.serviceY),
+        maxOf(1f, layout.width * .003f))
+    drawLine(lane, Offset(layout.floorRight, layout.floorTop), Offset(layout.floorRight, layout.serviceY),
+        maxOf(1f, layout.width * .003f))
+    drawLine(lane, Offset(layout.floorLeft, layout.serviceY), Offset(layout.floorRight, layout.serviceY),
+        maxOf(1f, layout.width * .003f))
 }
 
 private fun DrawScope.studioServiceLane(layout: StudioLayout) {
@@ -741,38 +791,23 @@ private fun DrawScope.studioWallProps(layout: StudioLayout, pulse: Float) {
 }
 
 private fun DrawScope.studioMachineBay(center: Offset, layout: StudioLayout, operating: Boolean, condition: Int, selected: Boolean) {
-    val w = layout.tileW * .88f
-    val h = layout.tileH * 1.15f
-    val safe = Path().apply {
-        moveTo(center.x, center.y - h * .55f)
-        lineTo(center.x + w * .52f, center.y)
-        lineTo(center.x, center.y + h * .55f)
-        lineTo(center.x - w * .52f, center.y)
-        close()
+    val w = layout.tileW * .82f
+    val h = layout.tileH * .78f
+    val color = when {
+        selected -> Color(0xFFFFC84D)
+        condition <= 80 -> Color(0xFFFF7474)
+        operating -> Color(0xFF66E4A6)
+        else -> Color(0xFF77CDED)
     }
-    drawPath(safe, Color(0xFF090D0F).copy(alpha = .20f))
-    drawPath(safe, if (operating) Color(0xFF55D98A).copy(alpha = .18f) else Color(0xFFE4B243).copy(alpha = .16f), style = Stroke(2f))
-    if (selected) {
-        drawPath(safe, Color(0xFFFFC84D).copy(alpha = .95f), style = Stroke(4f))
-        drawCircle(Color(0xFFFFC84D).copy(alpha = .18f), w * .42f, center)
-    }
-
-    // Piso sob a máquina / sombra.
-    drawOval(Color.Black.copy(alpha = .30f), topLeft = Offset(center.x - w * .38f, center.y + h * .10f), size = Size(w * .76f, h * .32f))
-
-    // Estado pela borda, sem etiquetas flutuantes enormes.
-    val state = when {
-        condition < 30 -> Color(0xFFFF6262)
-        operating -> Color(0xFF55E39A)
-        else -> Color(0xFFE8B84A)
-    }
-    drawCircle(state, 3.5f, Offset(center.x + w * .42f, center.y - h * .35f))
+    drawRoundRect(color.copy(alpha = if (selected) .14f else .045f), center - Offset(w / 2f, h / 2f),
+        Size(w, h), CornerRadius(w * .08f))
+    drawRoundRect(color.copy(alpha = if (selected) .9f else .3f), center - Offset(w / 2f, h / 2f),
+        Size(w, h), CornerRadius(w * .08f), style = Stroke(maxOf(1f, w * if (selected) .035f else .015f)))
 }
 
 private fun DrawScope.studioMachine(
     center: Offset,
     type: String,
-    title: String,
     operating: Boolean,
     condition: Int,
     phase: Float,
@@ -796,20 +831,8 @@ private fun DrawScope.studioMachine(
         else -> studioGenericMachine(center, operating, phase, scale)
     }
 
-    // Plaqueta pequena na própria máquina.
-    val short = title.replace("Centro de Usinagem", "Centro").take(17)
-    studioText(short, center.x, center.y + 27f * scale, 6.8f * scale, Color(0xFFD7DEE1), true, true)
-    studioText(
-        if (operating) "● PRODUZINDO" else "● EM ESPERA",
-        center.x,
-        center.y + 35f * scale,
-        5.1f * scale,
-        if (operating) Color(0xFF66E3A0) else Color(0xFFE6B64A),
-        true,
-        true
-    )
 
-    if (condition < 30) {
+    if (condition <= 80) {
         drawCircle(Color(0xFFFF5E5E).copy(alpha = .45f + pulse * .35f), 5f * scale, center + Offset(24f * scale, -27f * scale))
     }
 }
@@ -1199,7 +1222,7 @@ private fun DrawScope.studioWorker(
 
     if (employee.isLegendary) {
         drawCircle(Color(0xFFFFD268), 2.3f*s, head + Offset(-10f*s*width, -3f*s))
-        studioText(employee.name.take(12), x, y + 10f*s, 5.9f*s, Color(0xFFFFD781), true, true)
+        // Names and task details are shown in the selection panel, not over other workers.
     }
 }
 

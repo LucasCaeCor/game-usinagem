@@ -78,6 +78,8 @@ fun MachinesScreen(
     val machines by vm.machines.collectAsStateWithLifecycle()
     val employees by vm.employees.collectAsStateWithLifecycle()
     val factoryFrame = vm.factoryFrame.collectAsStateWithLifecycle()
+    val pendingCargo = vm.pendingCargo.collectAsStateWithLifecycle()
+    val delivering by vm.delivering.collectAsStateWithLifecycle()
     // V15_3_WORKLIFE_STATE
     val v15WorkLifeVm: WorkLifeViewModel = hiltViewModel()
     val v15WorkLife by v15WorkLifeVm.state.collectAsState()
@@ -205,7 +207,10 @@ fun MachinesScreen(
                     )
                 }
 
-                if (machines.isEmpty()) {
+                item {
+                    FactoryCargoPanel(pendingCargo.value, factoryFrame, delivering, vm::deliverCargo)
+                }
+                if (machines.isEmpty() && pendingCargo.value.isEmpty() && !delivering) {
                     item {
                         Box(
                             Modifier.fillMaxWidth().height(260.dp),
@@ -220,6 +225,9 @@ fun MachinesScreen(
                             machines = machines.filter { it.installed },
                             employees = employees,
                             factoryFrame = factoryFrame,
+                            pendingCargo = pendingCargo,
+                            delivering = delivering,
+                            onDeliver = vm::deliverCargo,
                             production = if (v15WorkLife.factoryOpen()) production.machineProduction else emptyList(),
                             soundEnabled = settings.sound,
                             speechEnabled = settings.npcSpeech,
@@ -814,6 +822,42 @@ private fun TeamFocusBar(
 }
 
 @Composable
+private fun FactoryCargoPanel(
+    cargo: List<br.com.usinagemmaster.data.local.entity.ProductionCargoEntity>,
+    frame: State<br.com.usinagemmaster.domain.simulation.FactoryFrame>,
+    delivering: Boolean,
+    onDeliver: () -> Unit,
+) {
+    // Observe only stage changes here; walking coordinates stay inside the Canvas.
+    val activity by remember(frame) { derivedStateOf { frame.value.owner.activity } }
+    val value = cargo.sumOf { it.valueCents }
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF142922)),
+        border = BorderStroke(1.dp, Color(0xFF397D60)),
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("ESTOQUE DE SAÍDA", color = Color(0xFF8BE4AD), fontWeight = FontWeight.Bold)
+            Text(Formatters.money(value), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text(
+                if (cargo.isEmpty()) "A equipe deposita as peças aqui. Cada fechamento de 10 min libera uma carga."
+                else "${String.format(Locale.getDefault(), "%.1f", cargo.sumOf { it.unitsMilli } / 1000.0)} peças • ${cargo.sumOf { it.cycles }} ciclo(s) acumulados",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (delivering) {
+                Text(activity.label, color = Color(0xFFFFD27A), fontWeight = FontWeight.Bold)
+            }
+            Button(onClick = onDeliver, enabled = cargo.isNotEmpty() && !delivering, modifier = Modifier.fillMaxWidth()) {
+                Text(if (delivering) "Entrega em andamento" else "Levar carga à entrega")
+            }
+            Text("O valor entra no caixa quando o dono chega à expedição. Cargas prontas ficam guardadas ao sair.",
+                style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9CAC2))
+        }
+    }
+}
+
+@Composable
 private fun FactoryEarningsPanel(
     production: ProductionSnapshot,
     lastSimulationAt: Long,
@@ -834,7 +878,7 @@ private fun FactoryEarningsPanel(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("RESULTADO DO TURNO", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9EACB2), fontWeight = FontWeight.Bold)
+                    Text("ESTIMATIVA DA PRÓXIMA CARGA", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9EACB2), fontWeight = FontWeight.Bold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             Formatters.money(production.netPer10MinutesCents),
@@ -854,7 +898,7 @@ private fun FactoryEarningsPanel(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("PRÓXIMO FECHAMENTO", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9EACB2))
+                    Text("LIBERA EM", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9EACB2))
                     Text(String.format(Locale.getDefault(), "%02d:%02d", min, sec), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge, color = Color.White)
                 }
             }

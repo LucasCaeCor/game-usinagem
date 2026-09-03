@@ -16,7 +16,7 @@ enum class WorkerActivity(val label: String) {
     FETCHING_MATERIAL("Buscando material"), FETCHING_TOOLS("Buscando ferramentas"),
     SETTING_UP("Preparando máquina"), WORKING("Usinando"),
     CARRYING_PART("Levando peças"), INSPECTING("Inspecionando"),
-    PACKING("Embalando / expedindo"), BREAK("Descansando na copa"),
+    PACKING("Depositando no estoque de saída"), BREAK("Descansando na copa"),
     GOING_HOME("Saindo do turno"), OFF_SHIFT("Fora do turno"),
     PHONE("No celular"), BLOCKED("Sem acesso à estação")
 }
@@ -50,6 +50,7 @@ data class FactoryInput(
     val machines: List<FactoryMachineInput> = emptyList(),
     val workers: List<FactoryWorkerInput> = emptyList(),
     val open: Boolean = true,
+    val cycleStartedAt: Long = 0L,
 )
 
 data class FactoryWorkerFrame(
@@ -76,6 +77,9 @@ data class FactoryFrame(
     val workers: List<FactoryWorkerFrame> = emptyList(),
     val machines: List<FactoryMachineFrame> = emptyList(),
     val open: Boolean = true,
+    val depositedLots: Int = 0,
+    val owner: FactoryOwnerFrame = FactoryOwnerFrame(),
+    val cargoInTransit: List<String> = emptyList(),
 )
 
 /** Four subdivisions per bay leave a connected corridor even with all 30 bays occupied. */
@@ -88,6 +92,7 @@ class FactoryFloor(machines: List<FactoryMachineInput>) {
         val TOOLS = FloorCell(0, 10)
         val INSPECTION = FloorCell(20, 16)
         val SHIPPING = FloorCell(20, 24)
+        val STAGING = FloorCell(12, 24)
         val BREAK_ROOM = FloorCell(0, 24)
         fun bay(machine: FactoryMachineInput) = FloorCell(
             machine.gridX.coerceIn(0, 4) * 4 + 2,
@@ -160,11 +165,13 @@ class FactorySimulation {
     private var topology = emptyList<Triple<String, Int, Int>>()
     private val agents = linkedMapOf<String, Agent>()
     private var remainder = 0.0
+    private var depositedLots = 0
 
     fun update(next: FactoryInput) {
         val nextTopology = next.machines.filter { it.installed }
             .map { Triple(it.id, it.gridX, it.gridY) }.sortedBy { it.first }
         val moved = nextTopology != topology
+        if (input.cycleStartedAt != next.cycleStartedAt) depositedLots = 0
         input = next
         if (moved) {
             topology = nextTopology
@@ -173,7 +180,13 @@ class FactorySimulation {
         val ids = next.workers.map { it.id }.toSet()
         agents.keys.retainAll(ids)
         next.workers.sortedBy { it.id }.forEach { worker ->
-            val agent = agents.getOrPut(worker.id) { Agent(worker, FactoryFloor.ENTRY.point()) }
+            // Rebuild an ongoing shift at each assigned bay, rather than spawning the
+            // entire staff on one entrance pixel every time the scene is created.
+            val agent = agents.getOrPut(worker.id) {
+                val initial = next.machines.firstOrNull { it.id == worker.machineId && it.installed }
+                    ?.let { FactoryFloor.bay(it) } ?: breakSeatFor(worker.id)
+                Agent(worker, initial.point())
+            }
             val reassigned = agent.input.machineId != worker.machineId
             agent.input = worker
             if (moved) {
@@ -219,7 +232,7 @@ class FactorySimulation {
             }
             FactoryMachineFrame(machine.id, state, agent?.let(::progress) ?: 0f, machine.condition in 81..350)
         }
-        return FactoryFrame(workers, machines, input.open)
+        return FactoryFrame(workers, machines, input.open, depositedLots)
     }
 
     private fun machine(agent: Agent) = input.machines.firstOrNull { it.id == agent.input.machineId && it.installed }
@@ -245,7 +258,15 @@ class FactorySimulation {
         }
     }
 
-    private fun breakSeat(agent: Agent) = FloorCell(0, 18 + Math.floorMod(agent.input.id.hashCode(), 7))
+    private fun breakSeat(agent: Agent) = breakSeatFor(agent.input.id)
+
+    private fun breakSeatFor(id: String): FloorCell {
+        val index = input.workers.map { it.id }.sorted().indexOf(id).coerceAtLeast(0)
+        // Reserve distinct positions along the free perimeter, instead of hashing everyone
+        // into seven overlapping seats on the left edge.
+        return if (index <= FactoryFloor.WIDTH) FloorCell(index, FactoryFloor.HEIGHT)
+        else FloorCell(0, (FactoryFloor.HEIGHT - 1 - index + FactoryFloor.WIDTH).coerceAtLeast(0))
+    }
 
     private fun travel(agent: Agent, target: FloorCell, task: WorkerActivity) {
         val start = floor.nearestWalkable(agent.position)
@@ -303,8 +324,9 @@ class FactorySimulation {
                 agent.carrying = true
                 travel(agent, FactoryFloor.INSPECTION, WorkerActivity.INSPECTING)
             }
-            WorkerActivity.INSPECTING -> travel(agent, FactoryFloor.SHIPPING, WorkerActivity.PACKING)
+            WorkerActivity.INSPECTING -> travel(agent, FactoryFloor.STAGING, WorkerActivity.PACKING)
             WorkerActivity.PACKING -> {
+                depositedLots = (depositedLots + 1).coerceAtMost(1000)
                 agent.carrying = false
                 travel(agent, FactoryFloor.STOCK, WorkerActivity.FETCHING_MATERIAL)
             }

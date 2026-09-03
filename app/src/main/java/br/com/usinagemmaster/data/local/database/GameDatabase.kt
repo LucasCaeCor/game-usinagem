@@ -9,9 +9,10 @@ import br.com.usinagemmaster.data.local.entity.*
     entities = [
         CompanyEntity::class, MachineEntity::class, EmployeeEntity::class,
         ContractEntity::class, FinancialTransactionEntity::class,
-        FacilityUpgradeEntity::class, GoalEntity::class, LegendaryMissionEntity::class
+        FacilityUpgradeEntity::class, GoalEntity::class, LegendaryMissionEntity::class,
+        ProductionCargoEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class GameDatabase : RoomDatabase() {
@@ -23,4 +24,5 @@ abstract class GameDatabase : RoomDatabase() {
     abstract fun facilityDao(): FacilityDao
     abstract fun goalDao(): GoalDao
     abstract fun legendaryMissionDao(): LegendaryMissionDao
+    abstract fun productionCargoDao(): ProductionCargoDao
 }

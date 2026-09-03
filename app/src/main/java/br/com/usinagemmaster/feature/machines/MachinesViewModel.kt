@@ -8,6 +8,10 @@ import br.com.usinagemmaster.domain.simulation.FactoryFrame
 import br.com.usinagemmaster.domain.simulation.FactoryInput
 import br.com.usinagemmaster.domain.simulation.FactoryMachineInput
 import br.com.usinagemmaster.domain.simulation.FactoryWorkerInput
+import br.com.usinagemmaster.domain.simulation.FactoryOwnerSimulation
+import br.com.usinagemmaster.domain.simulation.OwnerActivity
+import br.com.usinagemmaster.data.local.entity.ProductionCargoEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -61,6 +65,17 @@ class MachinesViewModel @Inject constructor(
 
     private val workLife = workLifeRepository.state.stateIn(viewModelScope, SharingStarted.Eagerly, WorkLifeState())
     private val factorySimulation = FactorySimulation()
+    private val ownerSimulation = FactoryOwnerSimulation()
+    val pendingCargo = repo.pendingCargo().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<ProductionCargoEntity>())
+    private val deliveryRequest = MutableStateFlow<List<String>?>(null)
+    private val _delivering = MutableStateFlow(false)
+    val delivering = _delivering.asStateFlow()
+    private var tripStarted = false
+
+    fun deliverCargo() {
+        val ids = pendingCargo.value.map { it.id }
+        if (ids.isNotEmpty() && deliveryRequest.compareAndSet(null, ids)) _delivering.value = true
+    }
 
     // One owner, monotonic clock, no database writes per frame. Stops when the UI stops collecting.
     val factoryFrame = flow {
@@ -70,7 +85,7 @@ class MachinesViewModel @Inject constructor(
             val schedule = workLife.value
             val rates = production.value.machineProduction.associateBy { it.machineId }
             val phoneId = workforce.value.activeIdleEmployeeId(now)
-            factorySimulation.update(FactoryInput(
+            val input = FactoryInput(
                 machines = machines.value.filter { it.installed }.map { machine ->
                     val rate = rates[machine.id]
                     FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed,
@@ -81,9 +96,37 @@ class MachinesViewModel @Inject constructor(
                         schedule.exhaustion(worker.id), schedule.isResting(worker.id, now), worker.id == phoneId)
                 },
                 open = schedule.factoryOpen(now),
-            ))
+                cycleStartedAt = dashboard.value.lastSimulationAt,
+            )
+            factorySimulation.update(input)
+            ownerSimulation.update(input.machines)
+            val request = deliveryRequest.value
+            if (request != null && !tripStarted) tripStarted = ownerSimulation.start()
             val currentTime = System.nanoTime()
-            emit(factorySimulation.advance((currentTime - previousTime) / 1_000_000_000.0))
+            val dt = (currentTime - previousTime) / 1_000_000_000.0
+            val owner = ownerSimulation.advance(dt)
+            if (request != null && owner.activity == OwnerActivity.AWAITING_PAYMENT) {
+                repo.deliverCargo(request).fold(
+                    onSuccess = { amount ->
+                        ownerSimulation.paymentRecorded()
+                        _message.value = if (amount > 0L) "Carga entregue • +${Formatters.money(amount)} no caixa"
+                            else "Entrega registrada"
+                    },
+                    onFailure = { error ->
+                        if (error is CancellationException) throw error
+                        ownerSimulation.cancel()
+                        _message.value = error.message ?: "Não foi possível entregar. A carga continua guardada."
+                    },
+                )
+            }
+            if (tripStarted && !ownerSimulation.snapshot().busy) {
+                tripStarted = false
+                deliveryRequest.value = null
+                _delivering.value = false
+            }
+            val ownerFrame = ownerSimulation.snapshot()
+            emit(factorySimulation.advance(dt).copy(owner = ownerFrame,
+                cargoInTransit = if (ownerFrame.carrying) request.orEmpty() else emptyList()))
             previousTime = currentTime
             delay(50L)
         }
@@ -208,7 +251,7 @@ class MachinesViewModel @Inject constructor(
 
         repo.accelerateProduction10Minutes().fold(
             onSuccess = { earned ->
-                _message.value = "+10 min produzidos agora • +${Formatters.money(earned)}"
+                _message.value = "+10 min produzidos • ${Formatters.money(earned)} em carga para entregar"
             },
             onFailure = { error ->
                 // Devolve a ficha se não foi possível produzir.

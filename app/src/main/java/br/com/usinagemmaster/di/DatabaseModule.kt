@@ -52,11 +52,27 @@ object DatabaseModule {
         }
     }
 
+    internal val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS production_cargo (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    valueCents INTEGER NOT NULL,
+                    unitsMilli INTEGER NOT NULL,
+                    cycles INTEGER NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    deliveredAt INTEGER
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_production_cargo_deliveredAt ON production_cargo(deliveredAt)")
+        }
+    }
+
     @Provides
     @Singleton
     fun database(@ApplicationContext context: Context): GameDatabase =
         Room.databaseBuilder(context, GameDatabase::class.java, "usinagem_master.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides fun companyDao(db: GameDatabase) = db.companyDao()
@@ -67,4 +83,5 @@ object DatabaseModule {
     @Provides fun facilityDao(db: GameDatabase) = db.facilityDao()
     @Provides fun goalDao(db: GameDatabase) = db.goalDao()
     @Provides fun legendaryMissionDao(db: GameDatabase) = db.legendaryMissionDao()
+    @Provides fun productionCargoDao(db: GameDatabase) = db.productionCargoDao()
 }
