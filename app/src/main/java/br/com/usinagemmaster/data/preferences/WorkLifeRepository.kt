@@ -10,6 +10,7 @@ import br.com.usinagemmaster.data.local.entity.EmployeeEntity
 import br.com.usinagemmaster.domain.worklife.FactoryScheduleMode
 import br.com.usinagemmaster.domain.worklife.WorkLifeState
 import br.com.usinagemmaster.domain.worklife.WorkSlice
+import br.com.usinagemmaster.domain.worklife.FatigueAccrual
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -34,6 +35,7 @@ class WorkLifeRepository @Inject constructor(
     private object Keys {
         val mode = stringPreferencesKey("mode")
         val fatigue = stringPreferencesKey("fatigue")
+        val preciseFatigue = stringPreferencesKey("fatigue_precise_v2")
         val resting = stringPreferencesKey("resting")
         val autoRest = booleanPreferencesKey("auto_rest")
     }
@@ -135,13 +137,14 @@ class WorkLifeRepository @Inject constructor(
 
         context.workLifeDataStore.edit { prefs ->
             val fatigue = parseIntMap(prefs[Keys.fatigue]).toMutableMap()
+            val preciseFatigue = parseDoubleMap(prefs[Keys.preciseFatigue]).toMutableMap()
             val resting = parseLongMap(prefs[Keys.resting]).toMutableMap()
             val allIds = employees.map { it.id } + PLAYER_ID
 
             allIds.forEach { id ->
                 val employee = employees.firstOrNull { it.id == id }
                 val assigned = id == PLAYER_ID || employee?.assignedMachineId != null
-                val oldFatigue = (fatigue[id] ?: 0).toDouble()
+                val oldFatigue = preciseFatigue[id] ?: (fatigue[id] ?: 0).toDouble()
 
                 val restUntil = before.restingUntil[id] ?: 0L
                 val restOverlapMillis = if (restUntil > startTime) {
@@ -150,21 +153,13 @@ class WorkLifeRepository @Inject constructor(
                 } else 0L
 
                 val restHours = restOverlapMillis / 3_600_000.0
-                val effectiveWorkHours = (slice.workHours - restHours).coerceAtLeast(0.0)
-
-                val workDelta = when {
-                    !assigned -> 1.2 * effectiveWorkHours
-                    before.mode == FactoryScheduleMode.CONTINUOUS_24H -> 6.5 * effectiveWorkHours
-                    else -> 4.0 * effectiveWorkHours
-                }
-
-                val homeRecovery = 8.5 * slice.pausedHours
-                val copaRecovery = 28.0 * restHours
-                val next = (oldFatigue + workDelta - homeRecovery - copaRecovery)
-                    .roundToInt()
-                    .coerceIn(0, 100)
+                val preciseNext = FatigueAccrual.advance(oldFatigue, assigned,
+                    before.mode == FactoryScheduleMode.CONTINUOUS_24H,
+                    slice.workHours, slice.pausedHours, restHours)
+                val next = preciseNext.roundToInt().coerceIn(0, 100)
 
                 fatigue[id] = next
+                preciseFatigue[id] = preciseNext
 
                 if (
                     before.mode == FactoryScheduleMode.CONTINUOUS_24H &&
@@ -180,6 +175,7 @@ class WorkLifeRepository @Inject constructor(
             resting.entries.removeAll { it.value <= eventTime }
 
             prefs[Keys.fatigue] = encodeIntMap(fatigue)
+            prefs[Keys.preciseFatigue] = preciseFatigue.entries.joinToString("|") { "${it.key}=${it.value}" }
             prefs[Keys.resting] = encodeLongMap(resting)
         }
     }
@@ -196,6 +192,15 @@ class WorkLifeRepository @Inject constructor(
             val pos = token.lastIndexOf('=')
             if (pos <= 0) null
             else token.substring(0, pos) to (token.substring(pos + 1).toIntOrNull() ?: 0)
+        }.toMap()
+
+    private fun parseDoubleMap(raw: String?): Map<String, Double> =
+        raw.orEmpty().split("|").mapNotNull { token ->
+            val pos = token.lastIndexOf('=')
+            if (pos <= 0) null else {
+                token.substring(pos + 1).toDoubleOrNull()?.takeIf { it.isFinite() }
+                    ?.let { token.substring(0, pos) to it.coerceIn(0.0, 100.0) }
+            }
         }.toMap()
 
     private fun parseLongMap(raw: String?): Map<String, Long> =

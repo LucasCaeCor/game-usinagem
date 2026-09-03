@@ -8,6 +8,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.repeatOnLifecycle
 import br.com.usinagemmaster.R
 import br.com.usinagemmaster.data.local.entity.MachineEntity
 import br.com.usinagemmaster.domain.model.MachineProduction
@@ -24,6 +28,7 @@ fun FactoryAudioLayer(
     production: List<MachineProduction>
 ) {
     val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val ambient = remember(context) {
         MediaPlayer.create(context, R.raw.factory_ambient)?.apply {
             isLooping = true
@@ -46,29 +51,54 @@ fun FactoryAudioLayer(
         it.machineType.contains("WELD") || it.machineType.contains("LASER") || it.machineType.contains("PLASMA")
     }
 
-    LaunchedEffect(enabled) {
-        if (enabled) {
-            if (ambient?.isPlaying != true) ambient?.start()
-        } else {
-            if (ambient?.isPlaying == true) ambient.pause()
-        }
-    }
-
-    LaunchedEffect(enabled, activeMachines.map { it.id }, hasHotWork) {
-        if (!enabled) return@LaunchedEffect
-        while (true) {
-            if (activeMachines.isNotEmpty()) {
-                val soundId = if (hasHotWork) weldSpark else machineTick
-                soundPool.play(soundId, .20f, .20f, 1, 0, 1f)
+    LifecycleStartEffect(enabled) {
+        val player = ambient
+        if (enabled && player != null) {
+            try {
+                if (!player.isPlaying) player.start()
+            } catch (_: IllegalStateException) {
             }
-            delay(if (hasHotWork) 2400L else 3100L)
+        } else if (player != null) {
+            try {
+                if (player.isPlaying) player.pause()
+            } catch (_: IllegalStateException) {
+            }
+        }
+        onStopOrDispose {
+            try {
+                if (player?.isPlaying == true) player.pause()
+            } catch (_: IllegalStateException) {
+            }
         }
     }
 
-    DisposableEffect(Unit) {
+    LaunchedEffect(enabled, activeMachines.map { it.id }, hasHotWork, lifecycle) {
+        if (!enabled) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                if (activeMachines.isNotEmpty()) {
+                    val soundId = if (hasHotWork) weldSpark else machineTick
+                    soundPool.play(soundId, .20f, .20f, 1, 0, 1f)
+                }
+                delay(if (hasHotWork) 2400L else 3100L)
+            }
+        }
+    }
+
+    DisposableEffect(ambient) {
         onDispose {
-            ambient?.stop()
-            ambient?.release()
+            ambient?.let {
+                try {
+                    if (it.isPlaying) it.stop()
+                } catch (_: Exception) {
+                }
+                it.release()
+            }
+        }
+    }
+
+    DisposableEffect(soundPool) {
+        onDispose {
             soundPool.release()
         }
     }

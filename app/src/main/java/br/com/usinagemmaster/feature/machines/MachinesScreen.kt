@@ -77,6 +77,7 @@ fun MachinesScreen(
     }
     val machines by vm.machines.collectAsStateWithLifecycle()
     val employees by vm.employees.collectAsStateWithLifecycle()
+    val factoryFrame = vm.factoryFrame.collectAsStateWithLifecycle()
     // V15_3_WORKLIFE_STATE
     val v15WorkLifeVm: WorkLifeViewModel = hiltViewModel()
     val v15WorkLife by v15WorkLifeVm.state.collectAsState()
@@ -216,15 +217,15 @@ fun MachinesScreen(
                 } else {
                     item {
                         FactoryLiveSceneStudio(
-                            machines = machines,
-                            employees = employees.filter { v15WorkLife.workerOnFloor(it.id) },
+                            machines = machines.filter { it.installed },
+                            employees = employees,
+                            factoryFrame = factoryFrame,
                             production = if (v15WorkLife.factoryOpen()) production.machineProduction else emptyList(),
                             soundEnabled = settings.sound,
                             speechEnabled = settings.npcSpeech,
                             speechDurationSeconds = settings.speechDurationSeconds,
                             playerProfile = playerProfile,
                             selectedMachineId = selectedId,
-                            idleEmployeeId = phoneIdleId,
                             onReprimand = vm::reprimand,
                             onSelect = { machine ->
                                 selectedId = machine.id

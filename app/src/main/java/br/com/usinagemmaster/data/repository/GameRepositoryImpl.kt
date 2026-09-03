@@ -18,6 +18,9 @@ import br.com.usinagemmaster.domain.catalog.LegendaryMissionCatalog
 import br.com.usinagemmaster.domain.model.*
 import br.com.usinagemmaster.domain.repository.GameRepository
 import br.com.usinagemmaster.domain.repository.OfflineReport
+import br.com.usinagemmaster.domain.simulation.WorkforceProduction
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import br.com.usinagemmaster.domain.simulation.ProductionEngine
 import br.com.usinagemmaster.domain.simulation.LegendaryMissionProgressEngine
 import br.com.usinagemmaster.domain.simulation.SimulationCadence
@@ -32,7 +35,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
 import kotlin.random.Random
-import br.com.usinagemmaster.domain.worklife.WorkLifeState
 
 @Singleton
 class GameRepositoryImpl @Inject constructor(
@@ -68,22 +70,22 @@ class GameRepositoryImpl @Inject constructor(
         )
     }
 
-    // V15_WORKLIFE_PRODUCTION_FLOW
-override fun production(): Flow<ProductionSnapshot> = combine(
-    machineDao.observeAll(),
-    employeeDao.observeAll(),
-    gamePreferences.workforce,
-    expansionRepository.state,
-    workLifeRepository.state,
-) { machines, employees, workforce, expansion, workLife ->
-    val now = System.currentTimeMillis()
-    val availableEmployees = if (workLife.factoryOpen(now)) {
-        employees.filterNot { workLife.isResting(it.id, now) }
-    } else emptyList()
-
-    val base = calculateProduction(machines, availableEmployees, workforce, expansion)
-    applyWorkLifeToSnapshot(base, workLife)
-}
+    // Refresh time-dependent availability even when Room/DataStore have not emitted a write.
+    override fun production(): Flow<ProductionSnapshot> = combine(
+        machineDao.observeAll(), employeeDao.observeAll(), gamePreferences.workforce,
+        expansionRepository.state, workLifeRepository.state,
+    ) { machines, employees, workforce, expansion, workLife ->
+        val calculate: (Long) -> ProductionSnapshot = { now ->
+            val base = calculateProduction(machines, employees, workforce, expansion, now)
+            WorkforceProduction.adjust(base, workLife, now)
+        }
+        calculate
+    }.combine(flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(1_000L)
+        }
+    }) { calculate, now -> calculate(now) }
 
     override fun machines() = machineDao.observeAll()
     override fun employees() = employeeDao.observeAll()
@@ -272,20 +274,15 @@ override fun production(): Flow<ProductionSnapshot> = combine(
 
         val productiveEmployees = employees.filterNot { workLife.isResting(it.id, eventTime) }
 
-val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
-        val activeWorkerIds = productiveEmployees
-            .filter { it.assignedMachineId != null }
-            .map { it.id }
-            .toMutableList()
-            .apply { if (machines.isNotEmpty()) add(WorkLifeRepository.PLAYER_ID) }
-
-        val exhaustionMultiplier = workLifeRepository.productivityMultiplier(workLife, activeWorkerIds)
-        val snapshot = applyWorkLifeToSnapshot(baseSnapshot, workLife)
+        val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
+        // The work slice already excludes closed hours. Do not apply today's open/closed
+        // status to previously worked hours, or apply fatigue a second time to the totals.
+        val snapshot = WorkforceProduction.adjust(baseSnapshot, workLife, eventTime, checkSchedule = false)
         val elapsedHours = workSlice.workMillis / 3_600_000.0
         val elapsedMinutes = workSlice.workMillis / 60_000L
-        val producedUnits = snapshot.totalUnitsPerHour * elapsedHours * exhaustionMultiplier
+        val producedUnits = snapshot.totalUnitsPerHour * elapsedHours
         val passiveNet = EconomyBalance.boostedProfit(
-            (snapshot.netPerHourCents * elapsedHours * exhaustionMultiplier).toLong().coerceAtLeast(0)
+            (snapshot.netPerHourCents * elapsedHours).toLong().coerceAtLeast(0)
         )
         var contractRewards = 0L
         var completedContracts = 0
@@ -440,39 +437,13 @@ val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce,
     }
 
     
-    // V15_APPLY_EXHAUSTION
-    private fun applyWorkLifeToSnapshot(
-        snapshot: ProductionSnapshot,
-        state: WorkLifeState,
-    ): ProductionSnapshot {
-        val adjustedMachines = snapshot.machineProduction.map { machine ->
-            val multiplier = when (val employeeId = machine.employeeId) {
-                null -> 1.0
-                else -> if (state.isResting(employeeId)) 0.0 else state.efficiency(employeeId)
-            }
-            machine.copy(unitsPerHour = machine.unitsPerHour * multiplier)
-        }
-        val adjustedUnits = adjustedMachines.filter { it.isOperating }.sumOf { it.unitsPerHour }
-        val ratio = if (snapshot.totalUnitsPerHour > 0.0) {
-            (adjustedUnits / snapshot.totalUnitsPerHour).coerceIn(0.0, 1.0)
-        } else 0.0
-        val adjustedGross = (snapshot.grossPerHourCents * ratio).toLong()
-        val adjustedEnergy = snapshot.energyPerHourCents
-        return snapshot.copy(
-            totalUnitsPerHour = adjustedUnits,
-            grossPerHourCents = adjustedGross,
-            netPerHourCents = (adjustedGross - adjustedEnergy).coerceAtLeast(0L),
-            machineProduction = adjustedMachines,
-        )
-    }
-
-private fun calculateProduction(
+    private fun calculateProduction(
         machines: List<MachineEntity>,
         employees: List<EmployeeEntity>,
         workforce: WorkforceState = WorkforceState(),
-        expansion: ExpansionState = ExpansionState()
+        expansion: ExpansionState = ExpansionState(),
+        now: Long = System.currentTimeMillis(),
     ): ProductionSnapshot {
-        val now = System.currentTimeMillis()
         val idleIds = if (workforce.snackImmunityActive(now)) {
             emptySet()
         } else {
@@ -486,8 +457,8 @@ private fun calculateProduction(
                 EmployeeRuntime(it.id, it.specialty, it.skillLevel, it.morale, it.trait, it.assignedMachineId, it.legendaryCode)
             },
             idleEmployeeIds = idleIds,
-        modifiers = expansion.productionModifiers()
-    )
+            modifiers = expansion.productionModifiers()
+        )
     }
 
     private suspend fun seedStarterMachine(now: Long) {

@@ -1,5 +1,5 @@
 package br.com.usinagemmaster.feature.machines
-// V17_FACTORY_VISUAL_POLISH — portrait Compose, sem engine externa
+// Fábrica Viva 2.0 — renderização dos estados operacionais do domínio
 
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
@@ -32,6 +32,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.State
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +68,13 @@ import br.com.usinagemmaster.data.local.entity.MachineEntity
 import br.com.usinagemmaster.domain.catalog.LegendaryEmployeeCatalog
 import br.com.usinagemmaster.domain.catalog.EmployeeVisualCatalog
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
+import br.com.usinagemmaster.domain.simulation.FactoryFrame
+import br.com.usinagemmaster.domain.simulation.FactoryFloor
+import br.com.usinagemmaster.domain.simulation.FactoryMachineInput
+import br.com.usinagemmaster.domain.simulation.FactoryMachineState
+import br.com.usinagemmaster.domain.simulation.FactoryWorkerFrame
+import br.com.usinagemmaster.domain.simulation.FloorPoint
+import br.com.usinagemmaster.domain.simulation.WorkerActivity
 import br.com.usinagemmaster.domain.model.MachineProduction
 import br.com.usinagemmaster.domain.social.LocalPlayerProfile
 import kotlin.math.PI
@@ -87,13 +97,13 @@ import kotlinx.coroutines.delay
 fun FactoryLiveSceneStudio(
     machines: List<MachineEntity>,
     employees: List<EmployeeEntity>,
+    factoryFrame: State<FactoryFrame>,
     production: List<MachineProduction>,
     soundEnabled: Boolean,
     speechEnabled: Boolean,
     speechDurationSeconds: Int,
     playerProfile: LocalPlayerProfile,
     selectedMachineId: String? = null,
-    idleEmployeeId: String? = null,
     onReprimand: (String) -> Unit = {},
     onSelect: (MachineEntity) -> Unit
 ) {
@@ -130,33 +140,40 @@ fun FactoryLiveSceneStudio(
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
+    var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var reprimandTargetId by remember { mutableStateOf<String?>(null) }
+    var ownerRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
+    val latestReprimand by rememberUpdatedState(onReprimand)
     val reprimandProgress = remember { Animatable(0f) }
     val minZoom = .78f
     val maxZoom = 3.25f
 
-    FactoryAudioLayer(soundEnabled, machines, production)
-
-    val productionByMachine = production.associateBy { it.machineId }
-    val employeeByMachine = employees.filter { it.assignedMachineId != null }.associateBy { it.assignedMachineId!! }
-    val operatingIds = production.filter { it.isOperating }.map { it.machineId }.toSet()
-    val waiting = employees.filter {
-        it.id != idleEmployeeId && (it.assignedMachineId == null || it.assignedMachineId !in operatingIds)
+    StudioSimulationAudio(soundEnabled, machines, production, factoryFrame)
+    val employeesById = remember(employees) { employees.associateBy { it.id } }
+    val sceneFloor = remember(machines) {
+        FactoryFloor(machines.map { FactoryMachineInput(it.id, it.gridX, it.gridY, it.installed) })
     }
-    val inspector = waiting.firstOrNull { it.legendaryCode == "nikao_narizudo" }
-    val logistics = waiting.firstOrNull {
-        it.id != inspector?.id && it.specialty.contains("STOCK", ignoreCase = true)
-    }
-    val coffeeEmployees = waiting.filterNot { it.id == inspector?.id || it.id == logistics?.id }.take(5)
-    val idleEmployee = employees.firstOrNull { it.id == idleEmployeeId && it.assignedMachineId != null }
 
-    LaunchedEffect(reprimandTargetId) {
+    LaunchedEffect(reprimandTargetId, sceneFloor) {
         val target = reprimandTargetId ?: return@LaunchedEffect
+        val worker = factoryFrame.value.workers.firstOrNull { it.id == target }
+        if (worker == null) {
+            reprimandTargetId = null
+            return@LaunchedEffect
+        }
+        ownerRoute = sceneFloor.route(FactoryFloor.ENTRY, sceneFloor.nearestWalkable(worker.position))
+        if (ownerRoute.isEmpty()) {
+            reprimandTargetId = null
+            return@LaunchedEffect
+        }
+        val duration = (ownerRoute.size * 180).coerceIn(900, 12000)
         reprimandProgress.snapTo(0f)
-        reprimandProgress.animateTo(1f, tween(1050))
-        onReprimand(target)
+        reprimandProgress.animateTo(1f, tween(duration, easing = LinearEasing))
+        if (factoryFrame.value.workers.any { it.id == target && it.activity == WorkerActivity.PHONE }) {
+            latestReprimand(target)
+        }
         delay(550L)
-        reprimandProgress.animateTo(0f, tween(720))
+        reprimandProgress.animateTo(0f, tween(duration, easing = LinearEasing))
         reprimandTargetId = null
     }
 
@@ -207,129 +224,75 @@ fun FactoryLiveSceneStudio(
                 studioServiceLane(layout)
                 studioWallProps(layout, pulse)
 
-                val sorted = machines.sortedWith(compareBy<MachineEntity> { it.gridX + it.gridY }.thenBy { it.gridY })
-                sorted.forEachIndexed { index, machine ->
-                    val point = studioIsoPoint(layout, machine.gridX, machine.gridY)
-                    val work = productionByMachine[machine.id]
-                    val operating = work?.isOperating == true
-                    val local = (workPhase + index * .113f) % 1f
-                    val title = MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType
-
-                    studioMachineBay(point, layout, operating, machine.condition, machine.id == selectedMachineId)
-                    studioMachine(
-                        center = point,
-                        type = machine.machineType,
-                        title = title,
-                        operating = operating,
-                        condition = machine.condition,
-                        phase = local,
-                        pulse = pulse,
-                        scale = visualScale
-                    )
-
-                    employeeByMachine[machine.id]?.let { employee ->
-                        val side = if ((machine.gridX + machine.gridY) % 2 == 0) -1f else 1f
-                        val base = point + Offset(layout.tileW * .31f * side, layout.tileH * .55f)
-                        studioOperatorAtMachine(
-                            base = base,
-                            machine = point,
-                            employee = employee,
-                            operating = operating,
-                            phoneIdle = employee.id == idleEmployeeId,
-                            phase = local,
-                            scale = visualScale
-                        )
+                val frame = factoryFrame.value
+                val states = frame.machines.associateBy { it.id }
+                studioStations(layout, visualScale)
+                frame.workers.firstOrNull { it.id == selectedWorkerId }?.let { worker ->
+                    val route = listOf(worker.position) + worker.route
+                    route.zipWithNext().forEach { (a, b) ->
+                        drawLine(Color(0xFF67D9F5).copy(alpha = .7f), studioWorldPoint(layout, a),
+                            studioWorldPoint(layout, b), 2f * visualScale, StrokeCap.Round)
                     }
                 }
 
-                inspector?.let { worker ->
-                    val t = studioTriangle((logisticsPhase * 1.08f + .17f) % 1f)
-                    val p = studioLerp(
-                        Offset(layout.floorLeft + layout.tileW * .55f, layout.backAisleY),
-                        Offset(layout.floorRight - layout.tileW * .55f, layout.backAisleY),
-                        t
-                    )
-                    studioWorker(
-                        base = p,
-                        employee = worker,
-                        phase = workPhase,
-                        walking = true,
-                        carrying = false,
-                        scale = visualScale * .96f
-                    )
-                    studioClipboard(p + Offset(13f * visualScale, -33f * visualScale), visualScale)
+                // Draw machines and people in floor-depth order, so a worker can pass behind a bay.
+                val drawables = machines.map { machine ->
+                    StudioDrawable(studioIsoPoint(layout, machine.gridX, machine.gridY).y, machine = machine)
+                } + frame.workers.filter { it.activity != WorkerActivity.OFF_SHIFT }.map { worker ->
+                    StudioDrawable(studioWorldPoint(layout, worker.position).y, worker = worker)
+                }
+                drawables.sortedBy { it.depth }.forEach { drawable ->
+                    drawable.machine?.let { machine ->
+                        val point = studioIsoPoint(layout, machine.gridX, machine.gridY)
+                        val state = states[machine.id]
+                        val operating = state?.state == FactoryMachineState.RUNNING
+                        val local = (workPhase + Math.floorMod(machine.id.hashCode(), 100) / 100f) % 1f
+                        studioMachineBay(point, layout, operating, machine.condition, machine.id == selectedMachineId)
+                        studioMachine(point, machine.machineType,
+                            MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType,
+                            operating, machine.condition, local, pulse, visualScale)
+                        state?.let {
+                            studioMachineStatus(point, layout, it.state, it.progress, it.needsMaintenance, visualScale)
+                        }
+                    }
+                    drawable.worker?.let { worker ->
+                        val employee = employeesById[worker.id] ?: return@let
+                        val point = studioWorldPoint(layout, worker.position)
+                        val working = worker.activity == WorkerActivity.WORKING || worker.activity == WorkerActivity.SETTING_UP
+                        val bay = machines.firstOrNull { it.id == worker.machineId }
+                        if (worker.id == selectedWorkerId) {
+                            drawOval(Color(0xFF67D9F5).copy(alpha = .65f), point + Offset(-12f, -4f) * visualScale,
+                                Size(24f * visualScale, 8f * visualScale), style = Stroke(2f * visualScale))
+                        }
+                        studioWorker(point, employee, workPhase, worker.walking, worker.carrying,
+                            worker.activity == WorkerActivity.PHONE, visualScale,
+                            workLean = if (working) .35f + pulse * .35f else 0f,
+                            armTarget = if (working && bay != null) studioIsoPoint(layout, bay.gridX, bay.gridY) else null)
+                        if (worker.activity == WorkerActivity.PHONE) studioPhoneStatus(point + Offset(0f, -66f * visualScale), visualScale)
+                        if (worker.activity == WorkerActivity.INSPECTING) studioClipboard(point + Offset(12f, -30f) * visualScale, visualScale)
+                        if (worker.activity == WorkerActivity.BREAK) studioText("☕", point.x, point.y - 56f * visualScale,
+                            13f * visualScale, Color(0xFFFFD38A), centered = true, bold = false)
+                    }
                 }
 
-                logistics?.let { worker ->
-                    val t = studioTriangle((logisticsPhase * 1.27f + .35f) % 1f)
-                    val p = Offset(
-                        layout.serviceLeft + (layout.serviceRight - layout.serviceLeft) * t,
-                        layout.serviceY
-                    )
-                    studioWorker(
-                        base = p,
-                        employee = worker,
-                        phase = workPhase,
-                        walking = true,
-                        carrying = true,
-                        scale = visualScale
-                    )
+                val ownerBase = studioWorldPoint(layout, studioRoutePoint(ownerRoute, reprimandProgress.value))
+                drawPlayerAvatarFigure(ownerBase, playerProfile.avatar, visualScale * 1.02f, workPhase,
+                    walking = reprimandProgress.isRunning, carrying = false)
+                studioOwnerBadge(ownerBase + Offset(0f, -56f * visualScale), playerProfile.displayName.ifBlank { "Você" })
+                if (reprimandTargetId != null && reprimandProgress.value > .98f) {
+                    studioSpeechBubble(ownerBase + Offset(0f, -68f * visualScale), "Vamos voltar ao trabalho!")
                 }
-
-                studioForklift(layout, logisticsPhase, visualScale)
-                studioMaterialCart(layout, (logisticsPhase + .42f) % 1f, visualScale * .9f)
-
-                // O dono da fábrica circula pelo corredor. Ao tocar no funcionário
-                // flagrado no celular, ele caminha fisicamente até a célula e dá a bronca.
-                val ownerT = studioTriangle((logisticsPhase * .73f + .58f) % 1f)
-                val ownerPatrol = Offset(
-                    layout.floorRight - layout.tileW * .12f,
-                    (layout.backAisleY + layout.tileH * .72f) +
-                        ((layout.serviceY - layout.tileH * .42f) - (layout.backAisleY + layout.tileH * .72f)) * ownerT
-                )
-                val reprimandEmployee = employees.firstOrNull { it.id == reprimandTargetId }
-                val reprimandMachine = reprimandEmployee?.assignedMachineId?.let { id -> machines.firstOrNull { it.id == id } }
-                val reprimandPoint = reprimandMachine?.let { machine ->
-                    val p = studioIsoPoint(layout, machine.gridX, machine.gridY)
-                    val side = if ((machine.gridX + machine.gridY) % 2 == 0) -1f else 1f
-                    p + Offset(layout.tileW * .31f * side, layout.tileH * .55f) + Offset(-side * 32f * visualScale, 4f * visualScale)
-                }
-                val ownerBase = if (reprimandPoint != null) {
-                    studioLerp(ownerPatrol, reprimandPoint, reprimandProgress.value)
-                } else ownerPatrol
-                drawPlayerAvatarFigure(
-                    base = ownerBase,
-                    avatar = playerProfile.avatar,
-                    scale = visualScale * 1.02f,
-                    phase = workPhase,
-                    walking = true,
-                    carrying = false
-                )
-                studioOwnerBadge(
-                    position = ownerBase + Offset(0f, -56f * visualScale),
-                    name = playerProfile.displayName.ifBlank { "Você" }
-                )
-                if (reprimandPoint != null && reprimandProgress.value > .72f) {
-                    studioSpeechBubble(ownerBase + Offset(0f, -68f * visualScale), "Ei! Guarda o celular e volta pra máquina.")
-                }
-
                 if (speechEnabled) {
-                    val speakers = sorted.mapNotNull { machine ->
-                        val worker = employeeByMachine[machine.id] ?: return@mapNotNull null
-                        if (worker.legendaryCode == null) return@mapNotNull null
-                        val machinePoint = studioIsoPoint(layout, machine.gridX, machine.gridY)
-                        Triple(worker, machinePoint + Offset(0f, -layout.tileH * 1.15f), productionByMachine[machine.id]?.isOperating == true)
+                    val speakers = frame.workers.filter {
+                        it.activity != WorkerActivity.OFF_SHIFT && employeesById[it.id]?.legendaryCode != null
                     }
-                    if (speakers.isNotEmpty()) {
-                        val roundMs = 22000L
-                        val now = System.currentTimeMillis()
-                        val round = (now / roundMs).toInt()
-                        val visible = speechDurationSeconds.coerceIn(5, 12) * 1000L
-                        if (now % roundMs < visible) {
-                            val speaker = speakers[round % speakers.size]
-                            LegendaryEmployeeCatalog.quote(speaker.first.legendaryCode, speaker.third, round)?.let { quote ->
-                                studioSpeechBubble(speaker.second, quote)
-                            }
+                    val now = System.currentTimeMillis()
+                    val round = (now / 22000L).toInt()
+                    if (speakers.isNotEmpty() && now % 22000L < speechDurationSeconds.coerceIn(5, 12) * 1000L) {
+                        val speaker = speakers[Math.floorMod(round, speakers.size)]
+                        LegendaryEmployeeCatalog.quote(employeesById[speaker.id]?.legendaryCode,
+                            speaker.activity == WorkerActivity.WORKING, round)?.let { quote ->
+                            studioSpeechBubble(studioWorldPoint(layout, speaker.position) + Offset(0f, -65f * visualScale), quote)
                         }
                     }
                 }
@@ -371,19 +334,20 @@ fun FactoryLiveSceneStudio(
                             onTap = { tap ->
                                 val layout = StudioLayout(widthPx, heightPx, tileW, tileH)
 
-                                // O funcionário no celular tem prioridade de toque sobre a máquina.
-                                val idleMachine = idleEmployee?.assignedMachineId?.let { id -> machines.firstOrNull { it.id == id } }
-                                val idleHit = idleMachine?.let { machine ->
-                                    val point = studioIsoPoint(layout, machine.gridX, machine.gridY)
-                                    val side = if ((machine.gridX + machine.gridY) % 2 == 0) -1f else 1f
-                                    val workerWorld = point + Offset(layout.tileW * .31f * side, layout.tileH * .55f)
-                                    val workerScreen = center + (workerWorld - center) * zoom + pan
-                                    studioDistance(tap, workerScreen) <= 34f * sceneVisualScale * zoom
-                                } == true
-
-                                if (idleHit && idleEmployee != null && reprimandTargetId == null) {
-                                    reprimandTargetId = idleEmployee.id
+                                val touchedWorker = factoryFrame.value.workers
+                                    .filter { it.activity != WorkerActivity.OFF_SHIFT }
+                                    .map { worker ->
+                                        val world = studioWorldPoint(layout, worker.position) + Offset(0f, -24f * sceneVisualScale)
+                                        val screen = center + (world - center) * zoom + pan
+                                        worker to studioDistance(tap, screen)
+                                    }.minByOrNull { it.second }?.takeIf { it.second <= 22f * sceneVisualScale * zoom }?.first
+                                if (touchedWorker != null) {
+                                    selectedWorkerId = touchedWorker.id
+                                    if (touchedWorker.activity == WorkerActivity.PHONE && reprimandTargetId == null) {
+                                        reprimandTargetId = touchedWorker.id
+                                    }
                                 } else {
+                                    selectedWorkerId = null
                                     val selected = machines.map { machine ->
                                         val world = studioIsoPoint(layout, machine.gridX, machine.gridY)
                                         val screen = center + (world - center) * zoom + pan
@@ -398,14 +362,13 @@ fun FactoryLiveSceneStudio(
                     }
             )
 
-            StudioSceneHeader(
+            StudioLiveHeader(
                 modifier = Modifier.align(Alignment.TopStart).padding(11.dp),
-                operating = production.count { it.isOperating },
-                waiting = production.count { !it.isOperating }
+                frame = factoryFrame,
             )
 
             StudioZoomControls(
-                modifier = Modifier.align(Alignment.TopEnd).padding(11.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(11.dp),
                 zoom = zoom,
                 onMinus = {
                     zoom = (zoom - .25f).coerceIn(minZoom, maxZoom)
@@ -419,11 +382,111 @@ fun FactoryLiveSceneStudio(
             )
 
         }
+        FactoryOperationsPanel(factoryFrame, employeesById, selectedWorkerId)
+    }
+}
+
+private data class StudioDrawable(val depth: Float, val machine: MachineEntity? = null, val worker: FactoryWorkerFrame? = null)
+
+private fun studioWorldPoint(layout: StudioLayout, point: FloorPoint): Offset {
+    val x = point.x / 4f - .5f
+    val y = point.y / 4f - .5f
+    return Offset(layout.centerX + (x - y) * layout.tileW * .46f,
+        layout.originY + (x + y) * layout.tileH * .49f)
+}
+
+private fun studioRoutePoint(route: List<FloorPoint>, progress: Float): FloorPoint {
+    if (route.isEmpty()) return FactoryFloor.ENTRY.point()
+    if (route.size == 1) return route.first()
+    val distance = progress.coerceIn(0f, 1f) * (route.size - 1)
+    val index = distance.toInt().coerceAtMost(route.size - 2)
+    val t = distance - index
+    val a = route[index]
+    val b = route[index + 1]
+    return FloorPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+}
+
+private fun DrawScope.studioStations(layout: StudioLayout, scale: Float) {
+    listOf(FactoryFloor.STOCK to "MATERIAL", FactoryFloor.TOOLS to "FERRAMENTAS",
+        FactoryFloor.INSPECTION to "QUALIDADE", FactoryFloor.SHIPPING to "EXPEDIÇÃO",
+        FactoryFloor.BREAK_ROOM to "COPA").forEach { (cell, name) ->
+        val point = studioWorldPoint(layout, cell.point())
+        drawCircle(Color(0xFF162D35), 11f * scale, point)
+        drawCircle(Color(0xFF77C5CD).copy(alpha = .65f), 11f * scale, point, style = Stroke(1f * scale))
+        studioText(name, point.x, point.y + 20f * scale, 6.5f * scale, Color(0xFFCAE5E6), true, true)
+    }
+}
+
+private fun DrawScope.studioMachineStatus(point: Offset, layout: StudioLayout, state: FactoryMachineState,
+    progress: Float, maintenance: Boolean, scale: Float) {
+    val color = when (state) {
+        FactoryMachineState.RUNNING -> Color(0xFF66E4A6)
+        FactoryMachineState.BROKEN -> Color(0xFFFF7474)
+        FactoryMachineState.SETUP, FactoryMachineState.MAINTENANCE -> Color(0xFFFFC766)
+        FactoryMachineState.WAITING_MATERIAL -> Color(0xFF77CDED)
+        else -> Color(0xFF9CAAB3)
+    }
+    val label = if (maintenance) "${state.label} • revisar" else state.label
+    val y = point.y + layout.tileH * .42f
+    studioText(label, point.x, y, 6.5f * scale, color, true, true)
+    if (state == FactoryMachineState.RUNNING || state == FactoryMachineState.SETUP) {
+        val left = Offset(point.x - 19f * scale, y + 4f * scale)
+        drawLine(Color(0xFF20343C), left, left + Offset(38f * scale, 0f), 2.5f * scale, StrokeCap.Round)
+        drawLine(color, left, left + Offset(38f * scale * progress, 0f), 2.5f * scale, StrokeCap.Round)
     }
 }
 
 @Composable
-private fun StudioSceneHeader(modifier: Modifier, operating: Int, waiting: Int) {
+private fun StudioSimulationAudio(enabled: Boolean, machines: List<MachineEntity>, production: List<MachineProduction>, frame: State<FactoryFrame>) {
+    val audioState by remember(frame) { derivedStateOf {
+        frame.value.open to frame.value.machines.filter { it.state == FactoryMachineState.RUNNING }.map { it.id }.toSet()
+    } }
+    FactoryAudioLayer(enabled && audioState.first, machines,
+        production.map { it.copy(isOperating = it.machineId in audioState.second) })
+}
+
+@Composable
+private fun StudioLiveHeader(modifier: Modifier, frame: State<FactoryFrame>) {
+    val counts by remember(frame) { derivedStateOf {
+        val running = frame.value.machines.count { it.state == FactoryMachineState.RUNNING }
+        Triple(running, frame.value.machines.size - running, frame.value.open)
+    } }
+    StudioSceneHeader(modifier, counts.first, counts.second, counts.third)
+}
+
+private data class StudioOperationSummary(
+    val moving: Int, val setup: Int, val quality: Int, val resting: Int,
+    val activity: WorkerActivity?, val target: WorkerActivity?, val fatigue: Int?,
+)
+
+@Composable
+private fun FactoryOperationsPanel(frame: State<FactoryFrame>, employees: Map<String, EmployeeEntity>, selectedId: String?) {
+    val summary by remember(frame, selectedId) { derivedStateOf {
+        val workers = frame.value.workers
+        val selected = workers.firstOrNull { it.id == selectedId }
+        StudioOperationSummary(workers.count { it.walking }, workers.count { it.activity == WorkerActivity.SETTING_UP },
+            workers.count { it.activity == WorkerActivity.INSPECTING }, workers.count { it.activity == WorkerActivity.BREAK },
+            selected?.activity, selected?.destinationActivity, selected?.fatigue)
+    } }
+    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text("ROTINA DA FÁBRICA", color = Color(0xFF77CDED), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Text("${summary.moving} em deslocamento • ${summary.setup} em preparação\n${summary.quality} na inspeção • ${summary.resting} na copa",
+            color = Color(0xFFD6E0E5), style = MaterialTheme.typography.bodySmall)
+        val employee = selectedId?.let { employees[it] }
+        if (employee != null && summary.activity != null) {
+            Text(employee.name, color = Color.White, style = MaterialTheme.typography.titleSmall)
+            val action = if (summary.activity == WorkerActivity.WALKING || summary.activity == WorkerActivity.CARRYING_PART)
+                "${summary.activity?.label} → ${summary.target?.label}" else summary.activity?.label.orEmpty()
+            Text("$action • cansaço ${summary.fatigue}%", color = Color(0xFFFFD38A), style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text("Toque em um funcionário para acompanhar a tarefa e a rota.", color = Color(0xFFAABBC4), style = MaterialTheme.typography.bodySmall)
+        }
+        Text("1 dedo rola a tela • 2 dedos movem e ampliam a fábrica", color = Color(0xFF8C9FA9), style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun StudioSceneHeader(modifier: Modifier, operating: Int, waiting: Int, open: Boolean) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(13.dp),
@@ -435,11 +498,11 @@ private fun StudioSceneHeader(modifier: Modifier, operating: Int, waiting: Int) 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("●", color = Color(0xFF61DEA0), style = MaterialTheme.typography.labelSmall)
+            Text("●", color = if (open) Color(0xFF61DEA0) else Color(0xFF9CAAB3), style = MaterialTheme.typography.labelSmall)
             Column {
-                Text("CHÃO DE FÁBRICA", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
-                Text("$operating operando  •  $waiting em espera", color = Color(0xFFAAB7BD), style = MaterialTheme.typography.labelSmall)
-                Text("1 dedo rola a tela  •  2 dedos movem/zoom", color = Color(0xFF7F949E), style = MaterialTheme.typography.labelSmall)
+                Text("FÁBRICA VIVA 2.0", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                Text(if (open) "$operating usinando  •  $waiting em outras etapas" else "Turno encerrado • equipe indo para casa", color = Color(0xFFAAB7BD), style = MaterialTheme.typography.labelSmall)
+                Text("Toque na equipe para seguir a rota", color = Color(0xFF7F949E), style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -476,37 +539,6 @@ private fun StudioControlButton(text: String, onClick: () -> Unit, wide: Boolean
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.ExtraBold
     )
-}
-
-@Composable
-private fun StudioCopaPanel(employees: List<EmployeeEntity>, modifier: Modifier, phase: Float) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(17.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xF2182024)),
-        border = BorderStroke(1.dp, Color(0xFFFFC766).copy(alpha = .36f))
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            Text("COPA • PAUSA", color = Color(0xFFFFD88D), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
-            if (employees.isEmpty()) {
-                Text("Ninguém em pausa agora.", color = Color(0xFFB5C0C5), style = MaterialTheme.typography.bodySmall)
-            } else {
-                employees.take(4).forEachIndexed { index, employee ->
-                    val sip = sin((phase + index * .17f) * PI * 2f).toFloat()
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text(if (sip > .28f) "☕" else "👷", style = MaterialTheme.typography.bodyMedium)
-                        Column {
-                            Text(employee.name, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text("pausa rápida", color = Color(0xFF9FABAF), style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 private fun DrawScope.studioOwnerBadge(position: Offset, name: String) {
@@ -975,56 +1007,6 @@ private fun DrawScope.studioSparks(c: Offset, phase: Float, s: Float, color: Col
         val len = (7f + 15f * p) * s
         val end = c + Offset(cos(angle) * len, (sin(angle) * len + p * 12f*s))
         drawLine(color.copy(alpha = (1f-p).coerceAtLeast(.15f)), c, end, (1.1f + (i%2)*.5f)*s, StrokeCap.Round)
-    }
-}
-
-private fun DrawScope.studioOperatorAtMachine(
-    base: Offset,
-    machine: Offset,
-    employee: EmployeeEntity,
-    operating: Boolean,
-    phoneIdle: Boolean,
-    phase: Float,
-    scale: Float
-) {
-    val cycle = phase.coerceIn(0f, 1f)
-    val toward = (machine - base)
-    val dir = if (toward.x >= 0f) 1f else -1f
-
-    // Micro-rotina: painel -> inclina -> inspeção curta -> retorna.
-    // Quando flagrado ocioso, a rotina troca para celular e a máquina para de produzir.
-    val workLean = if (operating && !phoneIdle) {
-        when {
-            cycle < .28f -> cycle / .28f
-            cycle < .58f -> 1f
-            cycle < .78f -> 1f - (cycle-.58f)/.20f
-            else -> 0f
-        }
-    } else 0f
-    val inspectStep = if (operating && !phoneIdle && cycle in .64f..90f) sin(((cycle-.64f)/.26f) * PI).toFloat() else 0f
-    val approach = if (operating && !phoneIdle) sin(cycle * PI).toFloat().coerceAtLeast(0f) else 0f
-    val body = base + Offset(
-        dir * (workLean * 8.5f + inspectStep * 6.5f + approach * 2.5f) * scale,
-        -abs(sin(cycle * PI * 2).toFloat()) * 1.3f * scale
-    )
-    val armTarget = machine + Offset(-dir * (11f + 3f * studioTriangle(cycle)) * scale, (-5f + 3f * sin(cycle * PI * 2).toFloat()) * scale)
-
-    studioWorker(
-        base = body,
-        employee = employee,
-        phase = phase * 1.35f,
-        walking = operating && !phoneIdle && (cycle < .18f || cycle > .82f),
-        carrying = false,
-        phone = phoneIdle,
-        scale = scale,
-        workLean = workLean,
-        armTarget = if (operating && !phoneIdle) armTarget else null
-    )
-
-    if (phoneIdle) {
-        studioPhoneStatus(body + Offset(0f, -66f * scale), scale)
-    } else if (!operating && cycle > .52f) {
-        studioClipboard(body + Offset(dir * 13f * scale, -31f * scale), scale)
     }
 }
 

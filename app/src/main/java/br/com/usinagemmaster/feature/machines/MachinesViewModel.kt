@@ -1,6 +1,19 @@
 package br.com.usinagemmaster.feature.machines
 import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 import br.com.usinagemmaster.data.preferences.ExpansionRepository
+import br.com.usinagemmaster.data.preferences.WorkLifeRepository
+import br.com.usinagemmaster.domain.worklife.WorkLifeState
+import br.com.usinagemmaster.domain.simulation.FactorySimulation
+import br.com.usinagemmaster.domain.simulation.FactoryFrame
+import br.com.usinagemmaster.domain.simulation.FactoryInput
+import br.com.usinagemmaster.domain.simulation.FactoryMachineInput
+import br.com.usinagemmaster.domain.simulation.FactoryWorkerInput
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -34,7 +47,8 @@ class MachinesViewModel @Inject constructor(
     playerProfilePreferences: PlayerProfilePreferences,
     private val social: SocialRepository,
     private val expansionRepository: ExpansionRepository,
-    private val premiumMachineInstaller: PremiumMachineInstaller
+    private val premiumMachineInstaller: PremiumMachineInstaller,
+    workLifeRepository: WorkLifeRepository,
 ) : ViewModel() {
     val machines = repo.machines().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<MachineEntity>())
     val employees = repo.employees().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<EmployeeEntity>())
@@ -44,6 +58,36 @@ class MachinesViewModel @Inject constructor(
     val engagement = prefs.engagement.stateIn(viewModelScope, SharingStarted.Eagerly, EngagementState())
     val workforce = prefs.workforce.stateIn(viewModelScope, SharingStarted.Eagerly, WorkforceState())
     val playerProfile = playerProfilePreferences.profile.stateIn(viewModelScope, SharingStarted.Eagerly, LocalPlayerProfile())
+
+    private val workLife = workLifeRepository.state.stateIn(viewModelScope, SharingStarted.Eagerly, WorkLifeState())
+    private val factorySimulation = FactorySimulation()
+
+    // One owner, monotonic clock, no database writes per frame. Stops when the UI stops collecting.
+    val factoryFrame = flow {
+        var previousTime = System.nanoTime()
+        while (currentCoroutineContext().isActive) {
+            val now = System.currentTimeMillis()
+            val schedule = workLife.value
+            val rates = production.value.machineProduction.associateBy { it.machineId }
+            val phoneId = workforce.value.activeIdleEmployeeId(now)
+            factorySimulation.update(FactoryInput(
+                machines = machines.value.filter { it.installed }.map { machine ->
+                    val rate = rates[machine.id]
+                    FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed,
+                        machine.condition, rate?.isOperating == true, rate?.unitsPerHour ?: 0.0)
+                },
+                workers = employees.value.map { worker ->
+                    FactoryWorkerInput(worker.id, worker.assignedMachineId, worker.skillLevel,
+                        schedule.exhaustion(worker.id), schedule.isResting(worker.id, now), worker.id == phoneId)
+                },
+                open = schedule.factoryOpen(now),
+            ))
+            val currentTime = System.nanoTime()
+            emit(factorySimulation.advance((currentTime - previousTime) / 1_000_000_000.0))
+            previousTime = currentTime
+            delay(50L)
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), FactoryFrame())
 
     private var lastPresenceAt = 0L
     private val _message = MutableStateFlow<String?>(null)
