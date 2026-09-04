@@ -52,8 +52,6 @@ fun AccountRootOverlay(
     }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var showTransferConfirmation by rememberSaveable { mutableStateOf(false) }
-    var showLocalResetConfirmation by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val auth = runCatching { FirebaseAuth.getInstance() }.getOrNull()
@@ -147,92 +145,6 @@ fun AccountRootOverlay(
         }
     }
 
-    // V25_TRANSFER_PROGRESS
-    fun transferProgressToSignedUser(closeAfter: Boolean) {
-        val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) } ?: return loginAndLink(closeAfter)
-        val before = AccountLinkStore.state(context)
-        if (!before.isLinked || before.linkedUid == user.uid) {
-            message = "Este progresso já pertence à conta selecionada."
-            showTransferConfirmation = false
-            return
-        }
-        if (busy) return
-
-        scope.launch {
-            busy = true
-            message = null
-            runCatching {
-                // Primeiro cria um backup recuperável no UID novo. Somente depois
-                // troca a propriedade local do slot.
-                val uploaded = cloudVm.forceUpload(user, before.localSaveId)
-                val transfer = AccountLinkStore.transferCurrentProgress(context, user)
-                linkState = transfer.state
-
-                if (uploaded.saveId != linkState.localSaveId) {
-                    linkState = AccountLinkStore.adoptCloudSave(context, user, uploaded.saveId)
-                }
-                runCatching { AccountLinkStore.retryCloudRegistry(context, user) }
-                cloudStatus = cloudVm.status()
-                cloudConflict = false
-
-                if (transfer.cloudRegistryUpdated) {
-                    "Transferência concluída. Este progresso agora pertence a ${user.email ?: "esta conta Google"} e o backup v${uploaded.revision} foi salvo na nuvem."
-                } else {
-                    "O save foi transferido e salvo na nuvem, mas o cadastro da conta será atualizado novamente na próxima sincronização."
-                }
-            }.onSuccess {
-                message = it
-                showTransferConfirmation = false
-                if (closeAfter) showStartup = false
-            }.onFailure {
-                showTransferConfirmation = false
-                message = it.message ?: "Não foi possível transferir este progresso. O vínculo anterior foi preservado."
-            }
-            busy = false
-        }
-    }
-
-
-    // V26_LOCAL_RESET
-    fun wipeLocalDataAfterCloudBackup() {
-        val user = authUser?.takeIf { linkState.isLinkedTo(it) && GoogleAuthBridge.isGoogleUser(it) }
-        if (user == null) {
-            message = "Vincule este progresso à conta Google antes de apagar os dados locais."
-            showLocalResetConfirmation = false
-            return
-        }
-        if (busy) return
-
-        scope.launch {
-            busy = true
-            message = null
-            runCatching {
-                // Antes de apagar qualquer byte local, confirma uma revisão recuperável.
-                val sync = syncCloud(user, visibleMessage = false)
-                require(sync.action != CloudSyncAction.CONFLICT) {
-                    "Existe conflito entre este aparelho e a nuvem. Resolva o conflito antes de apagar os dados locais."
-                }
-                cloudStatus = cloudVm.status()
-                require(cloudStatus.revision > 0L) {
-                    "O backup ainda não foi confirmado na nuvem. Sincronize novamente antes de apagar os dados locais."
-                }
-
-                // API oficial do Android para limpar os dados do próprio aplicativo.
-                // Remove Room, DataStore, SharedPreferences, FirebaseAuth local e localSaveId,
-                // mas NÃO toca no Firestore/Firebase Authentication remoto.
-                val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-                    ?: error("Não foi possível acessar o gerenciador de dados do Android.")
-                val started = activityManager.clearApplicationUserData()
-                check(started) { "O Android recusou a limpeza dos dados locais do aplicativo." }
-            }.onFailure {
-                showLocalResetConfirmation = false
-                message = it.message ?: "Não foi possível apagar os dados locais. Nenhum dado da nuvem foi removido."
-                busy = false
-            }
-            // Em caso de sucesso, o Android encerra o processo durante a limpeza.
-        }
-    }
-
     Box(Modifier.fillMaxSize()) {
         content()
 
@@ -254,13 +166,10 @@ fun AccountRootOverlay(
         StartupAccountDialog(
             user = authUser,
             linked = linkState.isLinkedTo(authUser),
-            linkedToAnotherAccount = linkState.isLinked && !linkState.isLinkedTo(authUser),
-            previousLinkedEmail = linkState.linkedEmail,
             busy = busy,
             message = message,
             onGoogle = { loginAndLink(true) },
             onLink = { linkSignedUser(true) },
-            onTransfer = { showTransferConfirmation = true },
             onSkip = { showStartup = false },
         )
     }
@@ -276,7 +185,6 @@ fun AccountRootOverlay(
             onDismiss = { showProfile = false },
             onGoogle = { loginAndLink(false) },
             onLink = { linkSignedUser(false) },
-            onTransfer = { showTransferConfirmation = true },
             onSyncSave = {
                 val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
                 if (user == null) message = "Entre com Google antes de sincronizar."
@@ -323,7 +231,6 @@ fun AccountRootOverlay(
                     busy = false
                 }
             },
-            onClearLocalData = { showLocalResetConfirmation = true },
             onSignOut = {
                 val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
                 scope.launch {
@@ -335,126 +242,16 @@ fun AccountRootOverlay(
             },
         )
     }
-
-    if (showTransferConfirmation) {
-        val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
-        if (user != null) {
-            AlertDialog(
-                onDismissRequest = { if (!busy) showTransferConfirmation = false },
-                icon = { Text("☁", style = MaterialTheme.typography.headlineLarge) },
-                title = { Text("Transferir este progresso?", fontWeight = FontWeight.Black) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            "Este save está vinculado a ${linkState.linkedEmail ?: "outra conta Google"}. " +
-                                "Você vai transferi-lo para ${user.email ?: user.displayName ?: "a conta atual"}."
-                        )
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Text(
-                                "O progresso ATUAL deste aparelho será enviado para a conta selecionada. " +
-                                    "Se essa conta já possuir um Cloud Save, ele será substituído por este progresso após a confirmação.",
-                                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        Text(
-                            "A troca de proprietário só acontece depois que o upload do backup termina com sucesso.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { transferProgressToSignedUser(closeAfter = showStartup) },
-                        enabled = !busy,
-                    ) {
-                        if (busy) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Transferindo...")
-                        } else {
-                            Text("TRANSFERIR E SALVAR", fontWeight = FontWeight.Black)
-                        }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showTransferConfirmation = false }, enabled = !busy) {
-                        Text("Cancelar")
-                    }
-                },
-            )
-        }
-    }
-
-    if (showLocalResetConfirmation) {
-        AlertDialog(
-            onDismissRequest = { if (!busy) showLocalResetConfirmation = false },
-            icon = { Text("🧹", style = MaterialTheme.typography.headlineLarge) },
-            title = { Text("Apagar dados locais deste aparelho?", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Antes de apagar, o jogo fará uma última sincronização com o Firebase. " +
-                            "Se o backup falhar ou existir conflito, a limpeza será cancelada."
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Text(
-                            "Isto apaga deste aparelho: banco local da fábrica, preferências, saveId, vínculo local e sessão Google/Firebase. " +
-                                "NÃO apaga cloud_saves, player_accounts nem o usuário do Firebase Authentication.",
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    Text(
-                        "Depois, abra o jogo novamente e entre com a mesma conta Google para testar a restauração como se fosse um celular novo.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { wipeLocalDataAfterCloudBackup() },
-                    enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) {
-                    if (busy) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Protegendo backup...")
-                    } else {
-                        Text("SINCRONIZAR E APAGAR LOCAL", fontWeight = FontWeight.Black)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLocalResetConfirmation = false }, enabled = !busy) {
-                    Text("Cancelar")
-                }
-            },
-        )
-    }
-
 }
 
 @Composable
 private fun StartupAccountDialog(
     user: FirebaseUser?,
     linked: Boolean,
-    linkedToAnotherAccount: Boolean,
-    previousLinkedEmail: String?,
     busy: Boolean,
     message: String?,
     onGoogle: () -> Unit,
     onLink: () -> Unit,
-    onTransfer: () -> Unit,
     onSkip: () -> Unit,
 ) {
     Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -493,36 +290,20 @@ private fun StartupAccountDialog(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                if (linkedToAnotherAccount && user != null) {
-                    Button(
-                        onClick = onTransfer,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                    ) {
-                        Text("Transferir este progresso para esta conta", fontWeight = FontWeight.Black)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Este save está ligado a ${previousLinkedEmail ?: "outra conta"}. A transferência cria primeiro o backup na conta atual e só depois muda o proprietário.",
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                    )
-                } else {
-                    Button(
-                        onClick = if (user == null) onGoogle else onLink,
-                        enabled = !busy && !linked,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                    ) {
-                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Text(if (user == null) "G  Continuar com Google" else if (linked) "✓ Progresso já vinculado" else "Vincular meu progresso atual")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "O primeiro vínculo envia seu save atual. Em um aparelho novo, um backup existente é restaurado antes de continuar.",
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                    )
+                Button(
+                    onClick = if (user == null) onGoogle else onLink,
+                    enabled = !busy && !linked,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                ) {
+                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Text(if (user == null) "G  Continuar com Google" else if (linked) "✓ Progresso já vinculado" else "Vincular meu progresso atual")
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "O primeiro vínculo envia seu save atual. Em um aparelho novo, um backup existente é restaurado antes de continuar.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
                 Spacer(Modifier.height(14.dp))
                 TextButton(onClick = onSkip, enabled = !busy) { Text("Jogar sem conectar agora") }
             }
@@ -541,11 +322,9 @@ private fun ProfileAccountDialog(
     onDismiss: () -> Unit,
     onGoogle: () -> Unit,
     onLink: () -> Unit,
-    onTransfer: () -> Unit,
     onSyncSave: () -> Unit,
     onForceUpload: () -> Unit,
     onForceRestore: () -> Unit,
-    onClearLocalData: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -675,53 +454,12 @@ private fun ProfileAccountDialog(
                                     }
                                 } else if (linkState.isLinked) {
                                     Text("⚠ Este save foi vinculado anteriormente a outra conta Google.", color = MaterialTheme.colorScheme.error)
-                                    Text(
-                                        linkState.linkedEmail?.let { "Conta anterior: $it" } ?: "UID anterior: …${linkState.linkedUid?.takeLast(8).orEmpty()}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                    Button(
-                                        onClick = onTransfer,
-                                        enabled = !busy,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Transferir para esta conta Google", fontWeight = FontWeight.Black)
-                                    }
                                 } else {
                                     Text("Este save ainda não está associado a uma conta Google.")
                                     Button(onClick = onLink, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Vincular progresso atual") }
                                 }
                             }
                         }
-                        ElevatedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            ),
-                        ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🧪 Testar recuperação da nuvem", fontWeight = FontWeight.Black)
-                                Text(
-                                    "Simula um celular novo: faz uma última sincronização e apaga somente os dados locais deste aplicativo.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    if (cloudStatus.revision > 0L) "Backup local conhecido: v${cloudStatus.revision}."
-                                    else "O jogo criará/confirmará o backup antes de permitir a limpeza.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                                OutlinedButton(
-                                    onClick = onClearLocalData,
-                                    enabled = !busy && linkState.isLinkedTo(user),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error,
-                                    ),
-                                ) {
-                                    Text("APAGAR DADOS LOCAIS DESTE APARELHO", fontWeight = FontWeight.Black)
-                                }
-                            }
-                        }
-
                         OutlinedButton(onClick = onSignOut, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text("Desconectar Google deste aparelho")
                         }

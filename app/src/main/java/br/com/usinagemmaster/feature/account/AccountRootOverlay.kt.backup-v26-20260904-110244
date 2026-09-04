@@ -53,7 +53,6 @@ fun AccountRootOverlay(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var showTransferConfirmation by rememberSaveable { mutableStateOf(false) }
-    var showLocalResetConfirmation by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val auth = runCatching { FirebaseAuth.getInstance() }.getOrNull()
@@ -192,47 +191,6 @@ fun AccountRootOverlay(
         }
     }
 
-
-    // V26_LOCAL_RESET
-    fun wipeLocalDataAfterCloudBackup() {
-        val user = authUser?.takeIf { linkState.isLinkedTo(it) && GoogleAuthBridge.isGoogleUser(it) }
-        if (user == null) {
-            message = "Vincule este progresso à conta Google antes de apagar os dados locais."
-            showLocalResetConfirmation = false
-            return
-        }
-        if (busy) return
-
-        scope.launch {
-            busy = true
-            message = null
-            runCatching {
-                // Antes de apagar qualquer byte local, confirma uma revisão recuperável.
-                val sync = syncCloud(user, visibleMessage = false)
-                require(sync.action != CloudSyncAction.CONFLICT) {
-                    "Existe conflito entre este aparelho e a nuvem. Resolva o conflito antes de apagar os dados locais."
-                }
-                cloudStatus = cloudVm.status()
-                require(cloudStatus.revision > 0L) {
-                    "O backup ainda não foi confirmado na nuvem. Sincronize novamente antes de apagar os dados locais."
-                }
-
-                // API oficial do Android para limpar os dados do próprio aplicativo.
-                // Remove Room, DataStore, SharedPreferences, FirebaseAuth local e localSaveId,
-                // mas NÃO toca no Firestore/Firebase Authentication remoto.
-                val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-                    ?: error("Não foi possível acessar o gerenciador de dados do Android.")
-                val started = activityManager.clearApplicationUserData()
-                check(started) { "O Android recusou a limpeza dos dados locais do aplicativo." }
-            }.onFailure {
-                showLocalResetConfirmation = false
-                message = it.message ?: "Não foi possível apagar os dados locais. Nenhum dado da nuvem foi removido."
-                busy = false
-            }
-            // Em caso de sucesso, o Android encerra o processo durante a limpeza.
-        }
-    }
-
     Box(Modifier.fillMaxSize()) {
         content()
 
@@ -323,7 +281,6 @@ fun AccountRootOverlay(
                     busy = false
                 }
             },
-            onClearLocalData = { showLocalResetConfirmation = true },
             onSignOut = {
                 val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
                 scope.launch {
@@ -389,59 +346,6 @@ fun AccountRootOverlay(
             )
         }
     }
-
-    if (showLocalResetConfirmation) {
-        AlertDialog(
-            onDismissRequest = { if (!busy) showLocalResetConfirmation = false },
-            icon = { Text("🧹", style = MaterialTheme.typography.headlineLarge) },
-            title = { Text("Apagar dados locais deste aparelho?", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Antes de apagar, o jogo fará uma última sincronização com o Firebase. " +
-                            "Se o backup falhar ou existir conflito, a limpeza será cancelada."
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Text(
-                            "Isto apaga deste aparelho: banco local da fábrica, preferências, saveId, vínculo local e sessão Google/Firebase. " +
-                                "NÃO apaga cloud_saves, player_accounts nem o usuário do Firebase Authentication.",
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    Text(
-                        "Depois, abra o jogo novamente e entre com a mesma conta Google para testar a restauração como se fosse um celular novo.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { wipeLocalDataAfterCloudBackup() },
-                    enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) {
-                    if (busy) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Protegendo backup...")
-                    } else {
-                        Text("SINCRONIZAR E APAGAR LOCAL", fontWeight = FontWeight.Black)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLocalResetConfirmation = false }, enabled = !busy) {
-                    Text("Cancelar")
-                }
-            },
-        )
-    }
-
 }
 
 @Composable
@@ -545,7 +449,6 @@ private fun ProfileAccountDialog(
     onSyncSave: () -> Unit,
     onForceUpload: () -> Unit,
     onForceRestore: () -> Unit,
-    onClearLocalData: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -692,36 +595,6 @@ private fun ProfileAccountDialog(
                                 }
                             }
                         }
-                        ElevatedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            ),
-                        ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🧪 Testar recuperação da nuvem", fontWeight = FontWeight.Black)
-                                Text(
-                                    "Simula um celular novo: faz uma última sincronização e apaga somente os dados locais deste aplicativo.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    if (cloudStatus.revision > 0L) "Backup local conhecido: v${cloudStatus.revision}."
-                                    else "O jogo criará/confirmará o backup antes de permitir a limpeza.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                                OutlinedButton(
-                                    onClick = onClearLocalData,
-                                    enabled = !busy && linkState.isLinkedTo(user),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error,
-                                    ),
-                                ) {
-                                    Text("APAGAR DADOS LOCAIS DESTE APARELHO", fontWeight = FontWeight.Black)
-                                }
-                            }
-                        }
-
                         OutlinedButton(onClick = onSignOut, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text("Desconectar Google deste aparelho")
                         }

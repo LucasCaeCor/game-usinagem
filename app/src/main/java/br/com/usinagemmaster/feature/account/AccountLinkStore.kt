@@ -93,6 +93,54 @@ object AccountLinkStore {
         return AccountLinkResult(after, cloudOk)
     }
 
+    // V25_TRANSFER_PROGRESS
+    /**
+     * Transfere explicitamente o save local para a conta Google atualmente autenticada.
+     * Deve ser chamado SOMENTE após o CloudSaveRepository confirmar o upload do save
+     * atual para o UID de destino. Assim, uma falha de rede nunca troca o dono local
+     * antes de existir um backup recuperável na conta nova.
+     */
+    suspend fun transferCurrentProgress(context: Context, user: FirebaseUser): AccountLinkResult {
+        val before = state(context)
+        require(before.isLinked && before.linkedUid != user.uid) {
+            "Este progresso não precisa ser transferido para esta conta."
+        }
+
+        val now = System.currentTimeMillis()
+        val persisted = prefs(context).edit()
+            .putString(KEY_UID, user.uid)
+            .putString(KEY_EMAIL, user.email)
+            .putString(KEY_NAME, user.displayName)
+            .putLong(KEY_LINKED_AT, now)
+            .commit()
+        check(persisted) { "Não foi possível atualizar o vínculo local da conta." }
+
+        val after = state(context)
+        val cloudOk = runCatching {
+            FirebaseFirestore.getInstance()
+                .collection("player_accounts")
+                .document(user.uid)
+                .set(
+                    mapOf(
+                        "uid" to user.uid,
+                        "email" to user.email,
+                        "displayName" to user.displayName,
+                        "localSaveId" to after.localSaveId,
+                        "provider" to "google",
+                        "cloudSaveEnabled" to true,
+                        "transferredFromUid" to before.linkedUid,
+                        "lastLinkedAt" to FieldValue.serverTimestamp(),
+                        "lastTransferredAt" to FieldValue.serverTimestamp(),
+                        "clientLinkedAtMs" to now,
+                    ),
+                    SetOptions.merge(),
+                )
+                .await()
+        }.isSuccess
+
+        return AccountLinkResult(after, cloudOk)
+    }
+
     /** Adota o mesmo slot de save ao restaurar a conta em outro aparelho. */
     fun adoptCloudSave(context: Context, user: FirebaseUser, cloudSaveId: String): AccountLinkState {
         require(cloudSaveId.isNotBlank()) { "ID do save na nuvem inválido." }
