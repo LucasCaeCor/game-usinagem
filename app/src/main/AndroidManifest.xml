@@ -9,6 +9,10 @@
         android:tag="@string/v18_empty_attribution_tag"
         android:label="@string/v18_attribution_label" />
 
+    <queries>
+        <package android:name="com.google.android.gms" />
+    </queries>
+
 <application
         android:name=".UsinagemMasterApplication"
         android:allowBackup="true"

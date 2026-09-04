@@ -2,10 +2,6 @@ package br.com.usinagemmaster.data.repository
 import androidx.room.withTransaction
 import br.com.usinagemmaster.data.local.database.GameDatabase
 import br.com.usinagemmaster.data.preferences.WorkLifeRepository
-import br.com.usinagemmaster.data.preferences.ActiveGameplayRepository
-import br.com.usinagemmaster.domain.gameplay.CareerState
-import br.com.usinagemmaster.domain.gameplay.OwnerWorkBatch
-import br.com.usinagemmaster.domain.gameplay.OwnerBatchSettlement
 import br.com.usinagemmaster.domain.expansion.ContractProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionProgression
 
@@ -56,8 +52,7 @@ class GameRepositoryImpl @Inject constructor(
     private val legendaryMissionDao: LegendaryMissionDao,
     private val gamePreferences: GamePreferences,
     private val expansionRepository: ExpansionRepository,
-    private val workLifeRepository: WorkLifeRepository,
-    private val activeGameplayRepository: ActiveGameplayRepository
+    private val workLifeRepository: WorkLifeRepository
 ) : GameRepository {
 
     private val simulationMutex = Mutex()
@@ -82,16 +77,18 @@ class GameRepositoryImpl @Inject constructor(
     // Refresh time-dependent availability even when Room/DataStore have not emitted a write.
     override fun production(): Flow<ProductionSnapshot> = combine(
         machineDao.observeAll(), employeeDao.observeAll(), gamePreferences.workforce,
-        expansionRepository.state, workLifeRepository.state.combine(activeGameplayRepository.state) { workLife, career -> workLife to career },
-    ) { machines, employees, workforce, expansion, workCareer ->
-        val (workLife, career) = workCareer
+        expansionRepository.state, workLifeRepository.state,
+    ) { machines, employees, workforce, expansion, workLife ->
         val calculate: (Long) -> ProductionSnapshot = { now ->
-            val base = calculateProduction(machines, employees, workforce, expansion, career, now)
+            val base = calculateProduction(machines, employees, workforce, expansion, now)
             WorkforceProduction.adjust(base, workLife, now)
         }
         calculate
     }.combine(flow {
-        while (true) { emit(System.currentTimeMillis()); delay(1_000L) }
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(1_000L)
+        }
     }) { calculate, now -> calculate(now) }
 
     override fun machines() = machineDao.observeAll()
@@ -197,7 +194,7 @@ class GameRepositoryImpl @Inject constructor(
             require(workLife.factoryOpen()) {
                 "Fábrica fechada no turno 12h. O próximo expediente começa às 07:00."
             }
-            val snapshot = calculateProduction(machineDao.getAll(), employeeDao.getAll(), gamePreferences.workforce.first(), expansionRepository.snapshot(), activeGameplayRepository.snapshot())
+            val snapshot = calculateProduction(machineDao.getAll(), employeeDao.getAll(), gamePreferences.workforce.first(), expansionRepository.snapshot())
             require(snapshot.operatingMachines > 0) { "Nenhuma máquina está produzindo agora" }
 
             val result = simulateProduction(
@@ -265,7 +262,6 @@ class GameRepositoryImpl @Inject constructor(
         val employees = employeeDao.getAll()
         val workforce = gamePreferences.workforce.first()
         val expansion = expansionRepository.snapshot()
-        val career = activeGameplayRepository.snapshot()
 
         // V15_WORKLIFE_SIMULATION
         val workLife = workLifeRepository.snapshot()
@@ -291,7 +287,7 @@ class GameRepositoryImpl @Inject constructor(
 
         val productiveEmployees = employees.filterNot { workLife.isResting(it.id, eventTime) }
 
-        val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce, expansion, career)
+        val baseSnapshot = calculateProduction(machines, productiveEmployees, workforce, expansion)
         // The work slice already excludes closed hours. Do not apply today's open/closed
         // status to previously worked hours, or apply fatigue a second time to the totals.
         val snapshot = WorkforceProduction.adjust(baseSnapshot, workLife, eventTime, checkSchedule = false)
@@ -459,7 +455,6 @@ class GameRepositoryImpl @Inject constructor(
         employees: List<EmployeeEntity>,
         workforce: WorkforceState = WorkforceState(),
         expansion: ExpansionState = ExpansionState(),
-        career: CareerState = CareerState(),
         now: Long = System.currentTimeMillis(),
     ): ProductionSnapshot {
         val idleIds = if (workforce.snackImmunityActive(now)) {
@@ -475,13 +470,7 @@ class GameRepositoryImpl @Inject constructor(
                 EmployeeRuntime(it.id, it.specialty, it.skillLevel, it.morale, it.trait, it.assignedMachineId, it.legendaryCode)
             },
             idleEmployeeIds = idleIds,
-            modifiers = expansion.productionModifiers().let { legacy ->
-                legacy.copy(
-                    globalSpeedMultiplier = legacy.globalSpeedMultiplier * career.automationSpeedMultiplier(),
-                    qualityBonus = legacy.qualityBonus + career.automationQualityBonus(),
-                    energyMultiplier = legacy.energyMultiplier * career.energyMultiplier(),
-                )
-            }
+            modifiers = expansion.productionModifiers()
         )
     }
 
@@ -818,48 +807,6 @@ class GameRepositoryImpl @Inject constructor(
             }
         }
         generateContractsIfNeeded()
-    }
-
-    override suspend fun settleOwnerBatch(batch: OwnerWorkBatch, commercialBonusPct: Int): Result<OwnerBatchSettlement> = runCatching {
-        var settlement: OwnerBatchSettlement? = null
-        simulationMutex.withLock {
-            require(batch.stage == br.com.usinagemmaster.domain.gameplay.ProductionStage.READY_TO_SHIP) { "Embale o lote antes de expedir" }
-            val contract = contractDao.byId(batch.contractId) ?: error("Contrato do lote não encontrado")
-            require(contract.status == ContractStatus.ACTIVE.name) { "Contrato não está mais ativo" }
-            require(batch.quality >= contract.requiredQuality) { "O lote não atingiu a qualidade mínima" }
-            val remaining = (contract.quantity - contract.completedQuantity).coerceAtLeast(0)
-            require(remaining > 0) { "Esse contrato já foi concluído" }
-            val applied = batch.producedQuantity.coerceAtMost(remaining)
-            val newCompleted = contract.completedQuantity + applied
-            val newProgress = maxOf(contract.productionProgressMilli, newCompleted * 1000L)
-            var reward = 0L
-            var bonus = 0L
-            if (newCompleted >= contract.quantity) {
-                val paid = contractDao.settleReward(
-                    contract.copy(completedQuantity = contract.quantity, productionProgressMilli = contract.quantity * 1000L),
-                    contractPayoutTransaction(contract, "Contrato concluído pelo dono: ${contract.clientName}")
-                )
-                if (paid) {
-                    reward = contract.rewardCents
-                    expansionRepository.consumeBoundTool(contract.id)
-                    expansionRepository.addPlayerXp(ContractProgression.characterXp(contract))
-                    val pct = commercialBonusPct.coerceIn(0, 25)
-                    if (pct > 0) {
-                        bonus = contract.rewardCents * pct / 100L
-                        if (bonus > 0) {
-                            val company = companyDao.get() ?: error("Empresa não inicializada")
-                            companyDao.upsert(company.copy(cashCents = company.cashCents + bonus))
-                            financeDao.insert(transaction(TransactionType.INCOME, TransactionCategory.BONUS, bonus, "Bônus comercial: ${contract.clientName}"))
-                        }
-                    }
-                }
-            } else {
-                contractDao.update(contract.copy(completedQuantity = newCompleted, productionProgressMilli = newProgress))
-            }
-            settlement = OwnerBatchSettlement(applied, contract.clientName, reward, bonus)
-        }
-        if (settlement?.contractRewardCents ?: 0L > 0L) generateContractsIfNeeded()
-        requireNotNull(settlement)
     }
 
     override suspend fun recoverContractReward(contractId: String): Result<Long> = runCatching {

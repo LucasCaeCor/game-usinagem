@@ -1,5 +1,4 @@
 package br.com.usinagemmaster.data.preferences
-import br.com.usinagemmaster.domain.gameplay.CareerState
 
 import android.content.Context
 import androidx.datastore.preferences.core.*
@@ -123,15 +122,15 @@ class ExpansionRepository @Inject constructor(
 
             val epicPity = (prefs[Keys.pityEpic] ?: 0) + 1
             val legendaryPity = (prefs[Keys.pityLegendary] ?: 0) + 1
-            val forcedLegendary = legendaryPity >= 100
-            val forcedEpic = epicPity >= 40
+            val forcedLegendary = legendaryPity >= 80
+            val forcedEpic = epicPity >= 30
             val roll = Random.nextInt(10_000)
 
             val reward = when {
-                forcedLegendary -> legendaryReward(companyLevel, ownedSkins, ownedMachines, ownedCharacters)
-                forcedEpic -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines, ownedCharacters)
-                roll < 80 -> legendaryReward(companyLevel, ownedSkins, ownedMachines, ownedCharacters)
-                roll < 450 -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines, ownedCharacters)
+                forcedLegendary -> legendaryReward(companyLevel, ownedSkins, ownedMachines)
+                forcedEpic -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines)
+                roll < 80 -> legendaryReward(companyLevel, ownedSkins, ownedMachines)
+                roll < 450 -> epicOrBetterReward(companyLevel, ownedSkins, ownedMachines)
                 roll < 1_250 -> randomPremiumMachine(companyLevel, ownedMachines)
                 roll < 3_050 -> randomCharacter(companyLevel, ownedCharacters)
                     ?: randomTool(Rarity.RARE)
@@ -229,19 +228,51 @@ class ExpansionRepository @Inject constructor(
         }
     }
 
-    /** Career milestones grant named prestige characters without spending cash. */
-    suspend fun syncCareerCharacterRewards(career: CareerState): Set<String> {
-        val grants = buildSet {
-            if (career.totalManualOperations >= 100) add("mestre_torneiro")
-            if (career.perfectOperations >= 25) add("inspetor_zero")
-            if (career.masteryXp.values.any { it >= 900 }) add("programadora_cnc")
-            if (career.shippedBatches >= 100 && career.perfectOperations >= 40) add("mestre_5_eixos")
-            if (career.shippedBatches >= 250 && career.totalManualOperations >= 500) add("lenda_chao_fabrica")
+    suspend fun buyPremiumCharacter(id: String, companyLevel: Int) {
+        val def = ExpansionCatalog.gachaCharacters.firstOrNull { it.id == id }
+            ?: error("Personagem premium inválido")
+        require(ExpansionCatalog.isPremiumCharacter(def)) {
+            "Esse personagem pertence à roleta comum"
         }
-        if (grants.isNotEmpty()) context.expansionDataStore.edit { prefs ->
-            prefs[Keys.ownedCharacters] = (prefs[Keys.ownedCharacters] ?: emptySet()) + grants
+        require(companyLevel >= def.minLevel) {
+            "Esse personagem libera no nível ${def.minLevel}"
         }
-        return grants
+
+        val state = snapshot()
+        require(id !in state.ownedCharacters) {
+            "Você já possui esse personagem premium"
+        }
+
+        val price = ExpansionCatalog.premiumCharacterPriceCents(id)
+        require(price > 0L) { "Preço do personagem não configurado" }
+
+        val company = companyDao.get() ?: error("Empresa não inicializada")
+        require(company.cashCents >= price) {
+            "Caixa insuficiente para contratar esse especialista permanentemente"
+        }
+
+        context.expansionDataStore.edit { prefs ->
+            prefs[Keys.ownedCharacters] = (prefs[Keys.ownedCharacters] ?: emptySet()) + id
+        }
+
+        try {
+            companyDao.upsert(company.copy(cashCents = company.cashCents - price))
+            financeDao.insert(
+                FinancialTransactionEntity(
+                    UUID.randomUUID().toString(),
+                    "EXPENSE",
+                    "SALARY",
+                    price,
+                    "Compra de personagem premium: ${def.name}",
+                    System.currentTimeMillis(),
+                )
+            )
+        } catch (error: Throwable) {
+            context.expansionDataStore.edit { prefs ->
+                prefs[Keys.ownedCharacters] = (prefs[Keys.ownedCharacters] ?: emptySet()) - id
+            }
+            throw error
+        }
     }
 
 
@@ -371,9 +402,8 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
         level: Int,
         ownedSkins: Set<String>,
         ownedMachines: Set<String>,
-        ownedCharacters: Set<String>,
     ): GachaReward {
-        if (Random.nextInt(100) < 18) return legendaryReward(level, ownedSkins, ownedMachines, ownedCharacters)
+        if (Random.nextInt(100) < 18) return legendaryReward(level, ownedSkins, ownedMachines)
 
         val candidates = buildList {
             addAll(
@@ -385,11 +415,6 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
                 ExpansionCatalog.tools
                     .filter { it.rarity == Rarity.EPIC }
                     .map { GachaReward("tool", it.id, it.name, it.rarity) }
-            )
-            addAll(
-                ExpansionCatalog.gachaCharacters
-                    .filter { ExpansionCatalog.isPremiumCharacter(it) && it.rarity == Rarity.EPIC && it.minLevel <= level + 5 && it.id !in ownedCharacters }
-                    .map { GachaReward("character", it.id, it.name, it.rarity) }
             )
             addAll(
                 ExpansionCatalog.premiumMachines
@@ -405,7 +430,6 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
         level: Int,
         ownedSkins: Set<String>,
         ownedMachines: Set<String>,
-        ownedCharacters: Set<String>,
     ): GachaReward {
         val candidates = buildList {
             addAll(
@@ -417,11 +441,6 @@ suspend fun activateRemoteHire(ownerUid: String, name: String, boostPct: Int, en
                 ExpansionCatalog.tools
                     .filter { it.rarity == Rarity.LEGENDARY }
                     .map { GachaReward("tool", it.id, it.name, it.rarity) }
-            )
-            addAll(
-                ExpansionCatalog.gachaCharacters
-                    .filter { ExpansionCatalog.isPremiumCharacter(it) && it.rarity == Rarity.LEGENDARY && it.minLevel <= level + 6 && it.id !in ownedCharacters }
-                    .map { GachaReward("character", it.id, it.name, it.rarity) }
             )
             addAll(
                 ExpansionCatalog.premiumMachines

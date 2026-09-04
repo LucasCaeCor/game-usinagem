@@ -78,9 +78,6 @@ import br.com.usinagemmaster.domain.simulation.FactoryWorkerFrame
 import br.com.usinagemmaster.domain.simulation.FloorPoint
 import br.com.usinagemmaster.domain.simulation.WorkerActivity
 import br.com.usinagemmaster.domain.model.MachineProduction
-import br.com.usinagemmaster.domain.gameplay.OwnerStation
-import br.com.usinagemmaster.domain.gameplay.OwnerWorkBatch
-import br.com.usinagemmaster.domain.gameplay.ProductionStage
 import br.com.usinagemmaster.domain.social.LocalPlayerProfile
 import kotlin.math.PI
 import kotlin.math.abs
@@ -112,8 +109,6 @@ fun FactoryLiveSceneStudio(
     speechDurationSeconds: Int,
     playerProfile: LocalPlayerProfile,
     selectedMachineId: String? = null,
-    ownerWorkBatch: OwnerWorkBatch? = null,
-    onOwnerStation: (OwnerStation) -> Unit = {},
     onReprimand: (String) -> Unit = {},
     onSelect: (MachineEntity) -> Unit
 ) {
@@ -153,12 +148,8 @@ fun FactoryLiveSceneStudio(
     var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var reprimandTargetId by remember { mutableStateOf<String?>(null) }
     var ownerRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
-    var ownerWorkCell by remember { mutableStateOf(FactoryFloor.ENTRY) }
-    var ownerWorkRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
-    val ownerWorkProgress = remember { Animatable(1f) }
     val latestReprimand by rememberUpdatedState(onReprimand)
     val latestDeliver by rememberUpdatedState(onDeliver)
-    val latestOwnerStation by rememberUpdatedState(onOwnerStation)
     val deliveryBusy by rememberUpdatedState(delivering)
     val reprimandProgress = remember { Animatable(0f) }
     val minZoom = .78f
@@ -168,24 +159,6 @@ fun FactoryLiveSceneStudio(
     val employeesById = remember(employees) { employees.associateBy { it.id } }
     val sceneFloor = remember(machines) {
         FactoryFloor(machines.map { FactoryMachineInput(it.id, it.gridX, it.gridY, it.installed) })
-    }
-
-    LaunchedEffect(ownerWorkBatch?.id, ownerWorkBatch?.stage, sceneFloor, machines) {
-        val batch = ownerWorkBatch
-        val target = when (batch?.stage) {
-            ProductionStage.MACHINED, ProductionStage.REWORK, ProductionStage.MACHINING -> machines.firstOrNull { it.id == batch.machineId }
-                ?.let { sceneFloor.nearestWalkable(FactoryFloor.bay(FactoryMachineInput(it.id, it.gridX, it.gridY, it.installed)).point()) } ?: FactoryFloor.ENTRY
-            ProductionStage.WAITING_QC, ProductionStage.QC, ProductionStage.APPROVED -> FactoryFloor.INSPECTION
-            ProductionStage.PACKING, ProductionStage.READY_TO_SHIP -> FactoryFloor.STAGING
-            ProductionStage.SHIPPED -> FactoryFloor.SHIPPING
-            ProductionStage.RAW, ProductionStage.WAITING_MACHINE -> FactoryFloor.STOCK
-            ProductionStage.SCRAP -> FactoryFloor.STAGING
-            null -> FactoryFloor.ENTRY
-        }
-        ownerWorkRoute = sceneFloor.route(ownerWorkCell, target).ifEmpty { listOf(target.point()) }
-        ownerWorkProgress.snapTo(0f)
-        ownerWorkProgress.animateTo(1f, tween((ownerWorkRoute.size * 135).coerceIn(350, 4500), easing = LinearEasing))
-        ownerWorkCell = target
     }
 
     LaunchedEffect(reprimandTargetId, sceneFloor, delivering) {
@@ -317,17 +290,10 @@ fun FactoryLiveSceneStudio(
                 }
 
                 val owner = frame.owner
-                val doingBatch = ownerWorkBatch != null && !owner.busy && reprimandTargetId == null
-                val ownerPoint = when { owner.busy -> owner.position; doingBatch -> studioRoutePoint(ownerWorkRoute, ownerWorkProgress.value); else -> studioRoutePoint(ownerRoute, reprimandProgress.value) }
-                val carryingBatch = ownerWorkBatch?.carrying == true && doingBatch
-                val ownerBase = studioWorldPoint(layout, ownerPoint)
+                val ownerBase = studioWorldPoint(layout, if (owner.busy) owner.position else studioRoutePoint(ownerRoute, reprimandProgress.value))
                 drawPlayerAvatarFigure(ownerBase, playerProfile.avatar, workerScale * 1.02f, workPhase,
-                    walking = if (owner.busy) owner.walking else if (doingBatch) ownerWorkProgress.isRunning else reprimandProgress.isRunning, carrying = owner.carrying || carryingBatch)
-                if (owner.carrying || carryingBatch) studioCargoCart(ownerBase + Offset(-19f, 0f) * workerScale, workerScale)
-                if (doingBatch && !ownerWorkProgress.isRunning) {
-                    val text = when (ownerWorkBatch?.stage) { ProductionStage.MACHINED -> "Levar ao Q"; ProductionStage.WAITING_QC, ProductionStage.QC -> "Inspecionar"; ProductionStage.APPROVED -> "Levar ao P"; ProductionStage.REWORK -> "Retrabalho"; ProductionStage.READY_TO_SHIP -> "Levar ao E"; else -> null }
-                    if (text != null) studioSpeechBubble(ownerBase + Offset(0f, -68f * workerScale), text)
-                }
+                    walking = if (owner.busy) owner.walking else reprimandProgress.isRunning, carrying = owner.carrying)
+                if (owner.carrying) studioCargoCart(ownerBase + Offset(-19f, 0f) * workerScale, workerScale)
                 // The owner's name remains in the profile; no floating nameplate over the map.
                 if (!deliveryBusy && reprimandTargetId != null && reprimandProgress.value > .98f) {
                     studioSpeechBubble(ownerBase + Offset(0f, -68f * workerScale), "Vamos voltar ao trabalho!")
@@ -387,14 +353,12 @@ fun FactoryLiveSceneStudio(
                                     layout.projection.unproject(tap.y, center.y, zoom, pan.y),
                                 )
 
-                                val stationRadius = maxOf(24f, layout.projection.cellWidth * .45f)
-                                val q = studioWorldPoint(layout, FactoryFloor.INSPECTION.point())
-                                if (studioDistance(worldTap, q) < stationRadius && ownerWorkBatch != null) { latestOwnerStation(OwnerStation.QUALITY); return@detectTapGestures }
-                                val e = studioWorldPoint(layout, FactoryFloor.SHIPPING.point())
-                                if (studioDistance(worldTap, e) < stationRadius && ownerWorkBatch != null) { latestOwnerStation(OwnerStation.SHIPPING); return@detectTapGestures }
                                 val dock = studioWorldPoint(layout, FactoryFloor.STAGING.point())
-                                if (studioDistance(worldTap, dock) < stationRadius && ownerWorkBatch?.stage == ProductionStage.APPROVED) { latestOwnerStation(OwnerStation.PACKING); return@detectTapGestures }
-                                if (studioDistance(worldTap, dock) < stationRadius && pendingCargo.value.isNotEmpty() && !deliveryBusy) { latestDeliver(); return@detectTapGestures }
+                                if (studioDistance(worldTap, dock) < maxOf(24f, layout.projection.cellWidth * .45f)
+                                    && pendingCargo.value.isNotEmpty() && !deliveryBusy) {
+                                    latestDeliver()
+                                    return@detectTapGestures
+                                }
                                 val touchedWorker = factoryFrame.value.workers
                                     .filter { it.activity != WorkerActivity.OFF_SHIFT }
                                     .map { worker ->
@@ -486,7 +450,7 @@ private fun studioRoutePoint(route: List<FloorPoint>, progress: Float): FloorPoi
 
 private fun DrawScope.studioStations(layout: StudioLayout, scale: Float) {
     listOf(FactoryFloor.STOCK to "M", FactoryFloor.TOOLS to "F",
-        FactoryFloor.INSPECTION to "Q", FactoryFloor.STAGING to "P", FactoryFloor.SHIPPING to "E",
+        FactoryFloor.INSPECTION to "Q", FactoryFloor.SHIPPING to "E",
         FactoryFloor.BREAK_ROOM to "C").forEach { (cell, name) ->
         val point = studioWorldPoint(layout, cell.point())
         val radius = layout.projection.cellWidth * .16f

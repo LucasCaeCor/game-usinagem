@@ -1,7 +1,5 @@
 package br.com.usinagemmaster.feature.community
 
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -199,21 +196,19 @@ private fun RemoteFactoryDetail(factory: CommunityFactory) {
                     Text("Proprietário: ${factory.playerName}", color = Color(0xFFD4DEE3))
                     Text("Nível ${factory.companyLevel} • reputação ${factory.reputation} • equipe ${factory.employeeCount}", color = Color(0xFFD4DEE3))
                     Text("Especialidade: ${factory.specialty}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    val locale = LocalConfiguration.current.locales[0]
-                    Text("Produção ${String.format(locale, "%.1f", factory.productionPer10Minutes)} pç/10 min • ${factory.activeContracts} contrato(s) • ${factory.pendingLots} lote(s) no dock", color = Color(0xFF9FD9B3), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
 
         item {
-            Text("Fábrica viva do jogador", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Text("Galpão público", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         }
 
         item { RemoteFactoryFloor(factory) }
 
         item {
             Text(
-                "Modo visitante: máquinas e trabalhadores continuam animados pelo snapshot publicado. Você pode observar, mas somente o proprietário opera minigames e altera a fábrica.",
+                "Modo visitante: você vê máquinas e layout, mas não pode mover, vender ou operar nada da fábrica do outro jogador.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -224,83 +219,43 @@ private fun RemoteFactoryDetail(factory: CommunityFactory) {
 @Composable
 private fun RemoteFactoryFloor(factory: CommunityFactory) {
     val line = MaterialTheme.colorScheme.outline.copy(alpha = .25f)
-    val transition = rememberInfiniteTransition(label = "remote_factory_live")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Restart),
-        label = "workers",
-    )
-    val pulse by transition.animateFloat(
-        initialValue = .35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-        label = "machines",
-    )
     Card(Modifier.fillMaxWidth()) {
         BoxWithConstraints(
-            Modifier.fillMaxWidth().height(460.dp).padding(8.dp)
+            Modifier.fillMaxWidth()
+                .height(440.dp)
+                .padding(8.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .25f), RoundedCornerShape(14.dp)),
         ) {
-            val cols = 5; val rows = 6; val cw = maxWidth / cols; val ch = maxHeight / rows
+            val cols = 5
+            val rows = 6
+            val cw = maxWidth / cols
+            val ch = maxHeight / rows
+
             Canvas(Modifier.matchParentSize()) {
-                for (x in 1 until cols) drawLine(line, Offset(size.width*x/cols,0f), Offset(size.width*x/cols,size.height))
-                for (y in 1 until rows) drawLine(line, Offset(0f,size.height*y/rows), Offset(size.width,size.height*y/rows))
-            }
-            factory.machines.forEach { m ->
-                Card(
-                    modifier = Modifier.offset(x=cw*m.x.toFloat(),y=ch*m.y.toFloat()).width(cw-5.dp).height(ch-5.dp),
-                    colors = CardDefaults.cardColors(containerColor=if(m.premium)MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
-                ) { Column(Modifier.padding(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Text(if(m.premium)"⭐🏭" else "🏭"); Spacer(Modifier.weight(1f)); Text(if(m.operating)"●" else "○",color=if(m.operating)Color(0xFF63D995).copy(alpha=.55f+pulse*.45f) else Color.Gray) }
-                    Text(m.name,maxLines=2,color=Color.White,style=MaterialTheme.typography.labelSmall,fontWeight=FontWeight.Bold)
-                    Text("Nv.${m.level} • ${m.condition/10}%",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)
-                } }
-            }
-            // O dono usa o último estado real publicado pela fábrica visitada.
-            val ownerMachine = factory.machines.firstOrNull { it.id == factory.ownerMachineId }
-            val ownerTarget = when (factory.ownerStage) {
-                "MACHINED", "REWORK", "MACHINING", "WAITING_MACHINE" ->
-                    (ownerMachine?.x?.toFloat() ?: .25f) to (ownerMachine?.y?.toFloat() ?: .25f)
-                "WAITING_QC", "QC", "APPROVED" -> 4f to 3.2f
-                "PACKING", "READY_TO_SHIP", "SHIPPED" -> 4f to 5f
-                else -> .25f to .25f
-            }
-            val ownerIcon = when (factory.ownerAvatar.uppercase()) {
-                "PRINCESS", "PRINCESA" -> "👸"
-                "TATUZÃO", "TATUZAO" -> "💪"
-                else -> "🧑‍🏭"
-            }
-            Surface(
-                modifier = Modifier
-                    .offset(x = cw * ownerTarget.first.coerceIn(0f, 4.5f), y = ch * ownerTarget.second.coerceIn(0f, 5.5f))
-                    .size(34.dp),
-                shape = RoundedCornerShape(17.dp),
-                color = Color(0xFF8B5E19),
-                shadowElevation = 5.dp,
-                border = BorderStroke(1.dp, Color(0xFFFFD27A).copy(alpha = .75f)),
-            ) {
-                Box(contentAlignment = Alignment.Center) { Text(if (factory.ownerCarrying) "📦" else ownerIcon) }
+                for (x in 1 until cols) {
+                    drawLine(line, Offset(size.width * x / cols, 0f), Offset(size.width * x / cols, size.height))
+                }
+                for (y in 1 until rows) {
+                    drawLine(line, Offset(0f, size.height * y / rows), Offset(size.width, size.height * y / rows))
+                }
             }
 
-            // Trabalhadores percorrem visualmente máquina → qualidade → expedição.
-            factory.workers.take(18).forEachIndexed { index, worker ->
-                val machine = factory.machines.firstOrNull { it.id == worker.assignedMachineId }
-                val local = (phase + index * .137f) % 1f
-                val mx = machine?.x?.toFloat() ?: 0f; val my = machine?.y?.toFloat() ?: 5f
-                val (tx,ty) = when {
-                    local < .62f -> mx to my
-                    local < .82f -> 4f to 3.2f // qualidade
-                    else -> 4f to 5f // expedição
+            factory.machines.forEach { m ->
+                Card(
+                    modifier = Modifier
+                        .offset(x = cw * m.x.toFloat(), y = ch * m.y.toFloat())
+                        .width(cw - 5.dp)
+                        .height(ch - 5.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (m.premium) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                    ),
+                ) {
+                    Column(Modifier.padding(6.dp)) {
+                        Text(if (m.premium) "⭐🏭" else "🏭")
+                        Text(m.name, maxLines = 2, color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Text("Nv.${m.level}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-                val wobble = kotlin.math.sin((local*6.283f)+index)*.12f
-                Surface(
-                    modifier=Modifier.offset(x=cw*(tx+wobble).coerceIn(0f,4.5f),y=ch*(ty+wobble).coerceIn(0f,5.5f)).size(28.dp),
-                    shape=RoundedCornerShape(14.dp),color=Color(0xFF274C5A),shadowElevation=3.dp,
-                ){Box(contentAlignment=Alignment.Center){Text(if(worker.skillLevel>=7)"🧑‍🔧" else "👷",style=MaterialTheme.typography.labelMedium)}}
-            }
-            Surface(Modifier.align(Alignment.BottomStart).padding(8.dp),color=Color(0xCC102027),shape=RoundedCornerShape(10.dp)) {
-                Text("👤 ${factory.playerName} • visitante somente observa",Modifier.padding(horizontal=9.dp,vertical=6.dp),color=Color.White,style=MaterialTheme.typography.labelSmall)
             }
         }
     }

@@ -53,13 +53,23 @@ internal fun FactorySimulationAudio(
     }
 
     LifecycleStartEffect(enabled) {
-        if (enabled) {
-            if (ambient?.isPlaying != true) ambient?.start()
-        } else {
-            if (ambient?.isPlaying == true) ambient.pause()
+        val player = ambient
+        if (enabled && player != null) {
+            try {
+                if (!player.isPlaying) player.start()
+            } catch (_: IllegalStateException) {
+            }
+        } else if (player != null) {
+            try {
+                if (player.isPlaying) player.pause()
+            } catch (_: IllegalStateException) {
+            }
         }
         onStopOrDispose {
-            if (ambient?.isPlaying == true) ambient.pause()
+            try {
+                if (player?.isPlaying == true) player.pause()
+            } catch (_: IllegalStateException) {
+            }
         }
     }
 
@@ -76,10 +86,20 @@ internal fun FactorySimulationAudio(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(ambient) {
         onDispose {
-            ambient?.stop()
-            ambient?.release()
+            ambient?.let {
+                try {
+                    if (it.isPlaying) it.stop()
+                } catch (_: Exception) {
+                }
+                it.release()
+            }
+        }
+    }
+
+    DisposableEffect(soundPool) {
+        onDispose {
             soundPool.release()
         }
     }

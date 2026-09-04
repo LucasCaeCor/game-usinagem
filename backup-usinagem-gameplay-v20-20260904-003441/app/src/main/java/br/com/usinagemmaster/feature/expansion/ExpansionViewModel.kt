@@ -81,6 +81,8 @@ class ExpansionViewModel @Inject constructor(
     fun unlockPlayerSkill(id: String) = action { expansionRepository.unlockPlayerSkill(id, uiState.value.companyLevel) }
     fun equipSkin(id: String) = action { expansionRepository.equipSkin(id, uiState.value.companyLevel) }
     fun equipCharacter(id: String) = action { expansionRepository.equipCharacter(id, uiState.value.companyLevel) }
+    fun buyPremiumCharacter(id: String) = action { expansionRepository.buyPremiumCharacter(id, uiState.value.companyLevel) }
+
     fun buyPremiumMachine(id: String) = action {
         expansionRepository.buyPremiumMachine(id, uiState.value.companyLevel)
         val installed = premiumMachineInstaller.install(id)

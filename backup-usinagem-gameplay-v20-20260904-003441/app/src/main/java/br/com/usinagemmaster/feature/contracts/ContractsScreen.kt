@@ -15,7 +15,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import br.com.usinagemmaster.core.designsystem.component.ScreenHeader
 import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.data.local.entity.ContractEntity
-import br.com.usinagemmaster.domain.gameplay.ContractGameplayProfile
 import br.com.usinagemmaster.domain.expansion.ContractProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionProgression
 import br.com.usinagemmaster.domain.expansion.ExpansionState
@@ -175,7 +174,6 @@ private fun ContractCardV8(
     val access = ContractProgression.access(c, companyLevel, expansion)
     val factoryXp = ContractProgression.factoryXp(c)
     val characterXp = ContractProgression.characterXp(c)
-    val gameplay = remember(c.id) { ContractGameplayProfile.from(c) }
 
     val container = if (special) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface
     val content = if (special) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface
@@ -225,16 +223,6 @@ private fun ContractCardV8(
                 style = MaterialTheme.typography.bodySmall,
                 color = content.copy(alpha = 0.82f),
             )
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .68f),
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Column(Modifier.fillMaxWidth().padding(9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("🏭 ${gameplay.segment} • material ${gameplay.material}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
-                    Text("📐 Tolerância ${gameplay.toleranceLabel} • refugo máx. ${gameplay.maxScrapPct}%", style = MaterialTheme.typography.bodySmall)
-                    Text("⚡ Bônus de entrega antecipada: até +${gameplay.earlyBonusPct}% • ${gameplay.processHint}", style = MaterialTheme.typography.labelSmall)
-                }
-            }
             Text(
                 "Prazo: ${remainingLabel(c.deadlineAt)} • multa ${Formatters.money(c.penaltyCents)}",
                 style = MaterialTheme.typography.bodySmall,

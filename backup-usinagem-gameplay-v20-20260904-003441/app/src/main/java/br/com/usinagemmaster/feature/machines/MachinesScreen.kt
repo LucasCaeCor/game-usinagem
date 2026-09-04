@@ -6,6 +6,12 @@ import br.com.usinagemmaster.feature.expansion.ExpansionLauncherCard
 
 import br.com.usinagemmaster.feature.expansion.ExpansionHubDialog
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -25,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -37,15 +44,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.data.local.entity.EmployeeEntity
 import br.com.usinagemmaster.data.local.entity.MachineEntity
-import br.com.usinagemmaster.data.local.entity.ContractEntity
-import br.com.usinagemmaster.domain.gameplay.OwnerStation
-import br.com.usinagemmaster.domain.gameplay.ProductionStage
-import br.com.usinagemmaster.feature.gameplay.ActiveGameplayViewModel
-import br.com.usinagemmaster.feature.gameplay.CareerJourneyCard
-import br.com.usinagemmaster.feature.gameplay.MachineMinigameDialog
-import br.com.usinagemmaster.feature.gameplay.OwnerBatchCard
-import br.com.usinagemmaster.feature.gameplay.OwnerOperationDialog
-import br.com.usinagemmaster.feature.gameplay.QualityInspectionDialog
 import br.com.usinagemmaster.data.preferences.EngagementState
 import br.com.usinagemmaster.data.preferences.WorkforceState
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
@@ -56,6 +54,7 @@ import br.com.usinagemmaster.domain.simulation.EconomyBalance
 import br.com.usinagemmaster.domain.simulation.SimulationCadence
 import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -69,11 +68,6 @@ fun MachinesScreen(
     // V11_WORK_LIFE_UI
     val workLifeVm: WorkLifeViewModel = hiltViewModel()
     val workLife by workLifeVm.state.collectAsStateWithLifecycle()
-    val activeGameplayVm: ActiveGameplayViewModel = hiltViewModel()
-    val career by activeGameplayVm.career.collectAsStateWithLifecycle()
-    val activeContracts by activeGameplayVm.contracts.collectAsStateWithLifecycle()
-    val ownerBusy by activeGameplayVm.busy.collectAsStateWithLifecycle()
-    val ownerMessage by activeGameplayVm.message.collectAsStateWithLifecycle()
 
     // EXPANSION_HUB_INJECTED
     val expansionHubVisible = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -102,10 +96,7 @@ fun MachinesScreen(
     var mode by remember { mutableStateOf(WarehouseMode.LIVE) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     var manageId by remember { mutableStateOf<String?>(null) }
-    var ownerOperationMachineId by remember { mutableStateOf<String?>(null) }
-    var ownerMinigameTarget by remember { mutableStateOf<Pair<MachineEntity, ContractEntity>?>(null) }
-    var ownerReworkTarget by remember { mutableStateOf<MachineEntity?>(null) }
-    var showOwnerQuality by remember { mutableStateOf(false) }
+    var showMinigame by remember { mutableStateOf(false) }
     var showDailyReward by remember { mutableStateOf(false) }
     var showCopa by remember { mutableStateOf(false) }
     var showSnackConfirm by remember { mutableStateOf(false) }
@@ -116,9 +107,6 @@ fun MachinesScreen(
             snack.showSnackbar(it)
             vm.clearMessage()
         }
-    }
-    LaunchedEffect(ownerMessage) {
-        ownerMessage?.let { snack.showSnackbar(it); activeGameplayVm.clearMessage() }
     }
 
     // Mantém o fechamento de 10 min vivo enquanto a fábrica está aberta.
@@ -185,7 +173,6 @@ fun MachinesScreen(
                         waiting = production.idleMachines
                     )
                 }
-                item { CareerJourneyCard(dashboard, machines, employees, career) }
                 item {
                     WarehouseTabs(mode = mode, onMode = { mode = it })
                 // EXPANSION_LAUNCHER_V2
@@ -203,8 +190,9 @@ fun MachinesScreen(
                 item {
                     FactoryActionRow(
                         engagement = engagement,
+                        now = now,
                         coffeeCount = coffee,
-                        onOperate = { machines.firstOrNull()?.let { selectedId = it.id; manageId = it.id } },
+                        onMinigame = { showMinigame = true },
                         onDailyReward = { showDailyReward = true },
                         onAccelerate = vm::accelerateProduction,
                         onCopa = { v15ShowCopa = true }
@@ -219,20 +207,6 @@ fun MachinesScreen(
                     )
                 }
 
-                item {
-                    OwnerBatchCard(
-                        career.activeBatch,
-                        career.activeBatch?.let { b -> activeContracts.firstOrNull { it.id == b.contractId } },
-                        career,
-                        activeGameplayVm::moveToQuality,
-                        { showOwnerQuality = true },
-                        activeGameplayVm::pack,
-                        activeGameplayVm::ship,
-                        { val b = career.activeBatch; ownerReworkTarget = b?.let { x -> machines.firstOrNull { it.id == x.machineId } } },
-                        activeGameplayVm::scrap,
-                        activeGameplayVm::abandon,
-                    )
-                }
                 item {
                     FactoryCargoPanel(pendingCargo.value, factoryFrame, delivering, vm::deliverCargo)
                 }
@@ -260,15 +234,6 @@ fun MachinesScreen(
                             speechDurationSeconds = settings.speechDurationSeconds,
                             playerProfile = playerProfile,
                             selectedMachineId = selectedId,
-                            ownerWorkBatch = career.activeBatch,
-                            onOwnerStation = { station ->
-                                when (station) {
-                                    OwnerStation.QUALITY -> when (career.activeBatch?.stage) { ProductionStage.MACHINED -> activeGameplayVm.moveToQuality(); ProductionStage.WAITING_QC, ProductionStage.QC -> showOwnerQuality = true; else -> Unit }
-                                    OwnerStation.PACKING -> if (career.activeBatch?.stage == ProductionStage.APPROVED) activeGameplayVm.pack()
-                                    OwnerStation.SHIPPING -> if (career.activeBatch?.stage == ProductionStage.READY_TO_SHIP) activeGameplayVm.ship()
-                                    else -> Unit
-                                }
-                            },
                             onReprimand = vm::reprimand,
                             onSelect = { machine ->
                                 selectedId = machine.id
@@ -373,7 +338,6 @@ fun MachinesScreen(
             employees = employees,
             production = production.machineProduction.firstOrNull { it.machineId == selectedMachine.id },
             onDismiss = { manageId = null },
-            onOperate = { ownerOperationMachineId = selectedMachine.id; manageId = null },
             onAssign = { employeeId -> vm.assign(selectedMachine.id, employeeId) },
             onRepair = { vm.repair(selectedMachine.id) },
             onSell = {
@@ -397,23 +361,16 @@ fun MachinesScreen(
         )
     }
 
-    val ownerOperationMachine = machines.firstOrNull { it.id == ownerOperationMachineId }
-    if (ownerOperationMachine != null) {
-        OwnerOperationDialog(ownerOperationMachine, activeGameplayVm.activeContracts(), career, ownerBusy,
-            onDismiss = { ownerOperationMachineId = null },
-            onManual = { c -> ownerMinigameTarget = ownerOperationMachine to c; ownerOperationMachineId = null },
-            onAssisted = { c -> activeGameplayVm.assistedCycle(ownerOperationMachine, c); ownerOperationMachineId = null })
-    }
-    ownerMinigameTarget?.let { (machine, contract) ->
-        MachineMinigameDialog(machine, contract, career, onDismiss = { ownerMinigameTarget = null }) { result -> activeGameplayVm.operateManually(machine, contract, result); ownerMinigameTarget = null }
-    }
-    ownerReworkTarget?.let { machine ->
-        val batch = career.activeBatch; val contract = batch?.let { b -> activeContracts.firstOrNull { it.id == b.contractId } }
-        if (batch != null && contract != null) MachineMinigameDialog(machine, contract, career, rework = true, onDismiss = { ownerReworkTarget = null }) { result -> activeGameplayVm.rework(result); ownerReworkTarget = null } else ownerReworkTarget = null
-    }
-    if (showOwnerQuality) {
-        val batch = career.activeBatch; val contract = batch?.let { b -> activeContracts.firstOrNull { it.id == b.contractId } }
-        if (batch != null && contract != null) QualityInspectionDialog(batch, contract, career, onDismiss = { showOwnerQuality = false }) { approve -> activeGameplayVm.inspect(approve); showOwnerQuality = false } else showOwnerQuality = false
+    if (showMinigame) {
+        ProductionMinigameDialog(
+            available = engagement.minigameAvailable,
+            remainingMillis = engagement.minigameRemainingMillis(now),
+            onDismiss = { showMinigame = false },
+            onFinished = { score ->
+                showMinigame = false
+                vm.completeMinigame(score)
+            }
+        )
     }
 
     if (showCopa) {
@@ -958,12 +915,14 @@ private fun FactoryEarningsPanel(
 @Composable
 private fun FactoryActionRow(
     engagement: EngagementState,
+    now: Long,
     coffeeCount: Int,
-    onOperate: () -> Unit,
+    onMinigame: () -> Unit,
     onDailyReward: () -> Unit,
     onAccelerate: () -> Unit,
     onCopa: () -> Unit
 ) {
+    val remaining = engagement.minigameRemainingMillis(now)
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
         shape = RoundedCornerShape(16.dp),
@@ -975,11 +934,11 @@ private fun FactoryActionRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FactoryActionCard(
-                title = "OPERAR",
-                subtitle = "Sem cooldown",
-                icon = "🧑‍🏭",
+                title = "MINIGAME",
+                subtitle = if (remaining == 0L) "Pronto" else "${(remaining / 60_000L) + 1} min",
+                icon = "🎮",
                 accent = Color(0xFFB45CFF),
-                onClick = onOperate,
+                onClick = onMinigame,
                 modifier = Modifier.weight(1f)
             )
             FactoryActionCard(
@@ -1147,6 +1106,72 @@ private fun DailyRewardDialog(
 }
 
 @Composable
+private fun ProductionMinigameDialog(
+    available: Boolean,
+    remainingMillis: Long,
+    onDismiss: () -> Unit,
+    onFinished: (Float) -> Unit
+) {
+    val transition = rememberInfiniteTransition(label = "minigame_cursor")
+    val cursor by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1_350, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursor"
+    )
+    val score = (1f - abs(cursor - .5f) * 2f).coerceIn(0f, 1f)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Text("🎮", style = MaterialTheme.typography.headlineLarge) },
+        title = { Text("Minigame de produção", fontWeight = FontWeight.Black) },
+        text = {
+            Column {
+                if (!available) {
+                    val seconds = remainingMillis / 1000L
+                    Text("O painel está resfriando. Volte em ${seconds / 60}:${String.format(Locale.getDefault(), "%02d", seconds % 60)}.")
+                } else {
+                    Text("Pare o marcador o mais perto possível do centro para ganhar caixa e impulsos.")
+                    Spacer(Modifier.height(18.dp))
+                    Canvas(Modifier.fillMaxWidth().height(54.dp)) {
+                        drawRoundRect(Color(0xFF29343B), size = size)
+                        drawRoundRect(
+                            Color(0xFF4DCA75).copy(alpha = .24f),
+                            topLeft = Offset(size.width * .40f, 0f),
+                            size = Size(size.width * .20f, size.height)
+                        )
+                        drawLine(
+                            color = Color(0xFFFFC126),
+                            start = Offset(size.width * cursor, 3f),
+                            end = Offset(size.width * cursor, size.height - 3f),
+                            strokeWidth = 8f
+                        )
+                        drawLine(
+                            color = Color.White.copy(alpha = .32f),
+                            start = Offset(size.width * .5f, 0f),
+                            end = Offset(size.width * .5f, size.height),
+                            strokeWidth = 2f
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Zona perfeita = 2 impulsos", color = Color(0xFF72E69A), fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onFinished(score) },
+                enabled = available
+            ) { Text(if (available) "PARAR AGORA" else "Recarregando") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } }
+    )
+}
+
+@Composable
 private fun FactoryBottomNavigation(activeRoute: String, onNavigate: (String) -> Unit) {
     val items = listOf(
         Triple("dashboard", "Visão geral", Icons.Default.Dashboard),
@@ -1301,7 +1326,6 @@ private fun MachineManagementDialog(
     employees: List<EmployeeEntity>,
     production: MachineProduction?,
     onDismiss: () -> Unit,
-    onOperate: () -> Unit,
     onAssign: (String?) -> Unit,
     onRepair: () -> Unit,
     onSell: () -> Unit
@@ -1375,10 +1399,6 @@ private fun MachineManagementDialog(
                 }
 
                 Text("Nível ${machine.level} • Especialidade: ${def?.specialty?.name ?: "-"}", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onOperate, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Engineering, null); Spacer(Modifier.width(7.dp)); Text("OPERAR EU MESMO", fontWeight = FontWeight.Black)
-                }
-                Text("Só o dono executa minigames. Funcionários continuam automáticos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
 
                 HorizontalDivider()
 

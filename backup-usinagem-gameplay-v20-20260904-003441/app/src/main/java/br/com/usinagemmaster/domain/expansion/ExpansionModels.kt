@@ -270,7 +270,7 @@ object ExpansionCatalog {
         GachaCharacterDefinition("fresadora_agil", "Fresadora Ágil", 3, Rarity.RARE, "+7% em fresagem.", millingPct = 7),
         GachaCharacterDefinition("controle_qualidade", "Controle de Qualidade", 4, Rarity.RARE, "+4 de qualidade.", qualityBonus = 4),
 
-        // PREMIUM V20: prestígio de roleta épica/lendária, pity, metas e eventos. Nunca compra direta.
+        // PREMIUM: não saem mais na roleta. São comprados permanentemente na Loja de Personagens.
         GachaCharacterDefinition("mestre_torneiro", "Mestre Torneiro", 5, Rarity.EPIC, "+12% em torneamento.", turningPct = 12),
         GachaCharacterDefinition("programadora_cnc", "Programadora CNC", 6, Rarity.EPIC, "+10% CNC e +3 qualidade.", qualityBonus = 3, cncPct = 10),
         GachaCharacterDefinition("inspetor_zero", "Inspetor Zero", 7, Rarity.EPIC, "+8 de qualidade.", qualityBonus = 8),
@@ -281,6 +281,15 @@ object ExpansionCatalog {
 
     fun isPremiumCharacter(character: GachaCharacterDefinition): Boolean =
         character.rarity == Rarity.EPIC || character.rarity == Rarity.LEGENDARY
+
+    fun premiumCharacterPriceCents(id: String): Long = when (id) {
+        "mestre_torneiro" -> 12_000_000L
+        "programadora_cnc" -> 16_000_000L
+        "inspetor_zero" -> 18_000_000L
+        "mestre_5_eixos" -> 35_000_000L
+        "lenda_chao_fabrica" -> 48_000_000L
+        else -> 0L
+    }
 
     val tools = listOf(
         ToolDefinition("broca_madeira", "Broca de madeira", Rarity.COMMON, 1.02, -2, "Ferramenta improvisada e básica: +2% velocidade, -2 qualidade."),

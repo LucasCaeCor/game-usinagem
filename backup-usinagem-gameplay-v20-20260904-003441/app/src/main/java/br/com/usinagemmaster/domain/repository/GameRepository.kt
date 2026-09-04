@@ -3,8 +3,6 @@ package br.com.usinagemmaster.domain.repository
 import br.com.usinagemmaster.data.local.entity.*
 import br.com.usinagemmaster.domain.model.DashboardStatus
 import br.com.usinagemmaster.domain.model.ProductionSnapshot
-import br.com.usinagemmaster.domain.gameplay.OwnerWorkBatch
-import br.com.usinagemmaster.domain.gameplay.OwnerBatchSettlement
 import kotlinx.coroutines.flow.Flow
 
 data class OfflineReport(
@@ -44,7 +42,6 @@ interface GameRepository {
     suspend fun generateContractsIfNeeded()
     suspend fun acceptContract(contract: ContractEntity): Result<Unit>
     suspend fun completeContract(contract: ContractEntity): Result<Unit>
-    suspend fun settleOwnerBatch(batch: OwnerWorkBatch, commercialBonusPct: Int = 0): Result<OwnerBatchSettlement>
     suspend fun recoverContractReward(contractId: String): Result<Long>
     suspend fun upgradeWarehouse(): Result<Unit>
     suspend fun claimGoal(goal: GoalEntity): Result<Unit>
