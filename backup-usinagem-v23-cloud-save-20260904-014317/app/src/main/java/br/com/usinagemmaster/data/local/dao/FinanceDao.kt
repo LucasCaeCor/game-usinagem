@@ -9,9 +9,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FinanceDao {
-    @Query("SELECT * FROM financial_transactions ORDER BY createdAt DESC") suspend fun getAll(): List<FinancialTransactionEntity>
-    @Query("DELETE FROM financial_transactions") suspend fun deleteAll()
     @Query("SELECT * FROM financial_transactions ORDER BY createdAt DESC LIMIT 100") fun observeRecent(): Flow<List<FinancialTransactionEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insert(value: FinancialTransactionEntity)
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(values: List<FinancialTransactionEntity>)
 }

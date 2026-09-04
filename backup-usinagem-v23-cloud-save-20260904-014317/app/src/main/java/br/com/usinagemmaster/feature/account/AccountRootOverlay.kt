@@ -18,34 +18,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import br.com.usinagemmaster.feature.expansion.GoogleAuthBridge
-import br.com.usinagemmaster.data.cloud.CloudSaveStatus
-import br.com.usinagemmaster.data.cloud.CloudSyncAction
-import br.com.usinagemmaster.data.cloud.CloudSyncResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
-fun AccountRootOverlay(
-    cloudVm: AccountCloudSaveViewModel = hiltViewModel(),
-    content: @Composable () -> Unit,
-) {
+fun AccountRootOverlay(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var authUser by remember { mutableStateOf<FirebaseUser?>(GoogleAuthBridge.currentGoogleUser()) }
     var linkState by remember { mutableStateOf(AccountLinkStore.state(context)) }
-    var cloudStatus by remember { mutableStateOf(cloudVm.status()) }
-    var cloudConflict by remember { mutableStateOf(false) }
     var showProfile by rememberSaveable { mutableStateOf(false) }
     var showStartup by rememberSaveable {
         mutableStateOf(authUser == null || !linkState.isLinkedTo(authUser))
@@ -63,45 +47,6 @@ fun AccountRootOverlay(
         onDispose { auth?.removeAuthStateListener(listener) }
     }
 
-    suspend fun syncCloud(user: FirebaseUser, visibleMessage: Boolean): CloudSyncResult {
-        val currentLink = AccountLinkStore.state(context)
-        val result = cloudVm.synchronize(user, currentLink.localSaveId)
-        if (result.action == CloudSyncAction.RESTORED && result.saveId != currentLink.localSaveId) {
-            linkState = AccountLinkStore.adoptCloudSave(context, user, result.saveId)
-            runCatching { AccountLinkStore.retryCloudRegistry(context, user) }
-        } else {
-            linkState = AccountLinkStore.state(context)
-        }
-        cloudStatus = cloudVm.status()
-        cloudConflict = result.action == CloudSyncAction.CONFLICT
-        if (visibleMessage) message = result.message
-        return result
-    }
-
-    // Enquanto a conta está conectada, verifica alterações periodicamente. O repositório
-    // calcula fingerprint e não grava no Firestore se nada mudou.
-    LaunchedEffect(authUser?.uid, linkState.linkedUid, linkState.localSaveId) {
-        val user = authUser?.takeIf { linkState.isLinkedTo(it) } ?: return@LaunchedEffect
-        runCatching { syncCloud(user, visibleMessage = false) }
-        while (true) {
-            delay(5 * 60_000L)
-            runCatching { syncCloud(user, visibleMessage = false) }
-        }
-    }
-
-    // Ao sair do app / mandar para segundo plano, tenta persistir a última alteração.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, authUser?.uid, linkState.linkedUid, linkState.localSaveId) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                val user = authUser?.takeIf { linkState.isLinkedTo(it) } ?: return@LifecycleEventObserver
-                scope.launch { runCatching { syncCloud(user, visibleMessage = false) } }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
     fun loginAndLink(closeAfter: Boolean) {
         if (busy) return
         scope.launch {
@@ -110,19 +55,17 @@ fun AccountRootOverlay(
             runCatching {
                 val user = GoogleAuthBridge.signInUser(context)
                 authUser = user
-                val link = AccountLinkStore.linkCurrentProgress(context, user)
-                linkState = link.state
-                val cloud = syncCloud(user, visibleMessage = false)
-                when (cloud.action) {
-                    CloudSyncAction.RESTORED -> "Conta Google conectada. Seu progresso da nuvem foi restaurado neste aparelho."
-                    CloudSyncAction.UPLOADED -> "Conta Google conectada. Seu progresso foi salvo na nuvem."
-                    CloudSyncAction.UP_TO_DATE -> "Conta Google conectada e save sincronizado."
-                    CloudSyncAction.CONFLICT -> cloud.message
+                val result = AccountLinkStore.linkCurrentProgress(context, user)
+                linkState = result.state
+                if (result.cloudRegistryUpdated) {
+                    "Conta Google conectada e progresso atual vinculado."
+                } else {
+                    "Conta Google conectada e save preservado. O registro no Firestore ficou pendente; publique as regras da V4."
                 }
             }.onSuccess {
                 message = it
-                if (closeAfter && !cloudConflict) showStartup = false
-            }.onFailure { message = it.message ?: "Não foi possível entrar e sincronizar com Google." }
+                if (closeAfter) showStartup = false
+            }.onFailure { message = it.message ?: "Não foi possível entrar com Google." }
             busy = false
         }
     }
@@ -133,14 +76,13 @@ fun AccountRootOverlay(
         scope.launch {
             busy = true
             message = null
-            runCatching {
-                val link = AccountLinkStore.linkCurrentProgress(context, user)
-                linkState = link.state
-                syncCloud(user, visibleMessage = false)
-            }.onSuccess { cloud ->
-                message = cloud.message
-                if (closeAfter && cloud.action != CloudSyncAction.CONFLICT) showStartup = false
-            }.onFailure { message = it.message ?: "Falha ao vincular e sincronizar progresso." }
+            runCatching { AccountLinkStore.linkCurrentProgress(context, user) }
+                .onSuccess {
+                    linkState = it.state
+                    message = if (it.cloudRegistryUpdated) "Progresso atual vinculado à conta Google." else "Progresso vinculado localmente; registro Firestore pendente."
+                    if (closeAfter) showStartup = false
+                }
+                .onFailure { message = it.message ?: "Falha ao vincular progresso." }
             busy = false
         }
     }
@@ -178,67 +120,28 @@ fun AccountRootOverlay(
         ProfileAccountDialog(
             user = authUser,
             linkState = linkState,
-            cloudStatus = cloudStatus,
-            cloudConflict = cloudConflict,
             busy = busy,
             message = message,
             onDismiss = { showProfile = false },
             onGoogle = { loginAndLink(false) },
             onLink = { linkSignedUser(false) },
-            onSyncSave = {
+            onRetryCloud = {
                 val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
-                if (user == null) message = "Entre com Google antes de sincronizar."
-                else scope.launch {
-                    busy = true
-                    runCatching { syncCloud(user, visibleMessage = true) }
-                        .onFailure { message = it.message ?: "Falha ao sincronizar o save." }
-                    busy = false
-                }
-            },
-            onForceUpload = {
-                val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
-                if (user == null) message = "Entre com Google antes de continuar."
-                else scope.launch {
-                    busy = true
-                    runCatching { cloudVm.forceUpload(user, linkState.localSaveId) }
-                        .onSuccess { result ->
-                            if (result.saveId != linkState.localSaveId) {
-                                linkState = AccountLinkStore.adoptCloudSave(context, user, result.saveId)
-                            }
-                            runCatching { AccountLinkStore.retryCloudRegistry(context, user) }
-                            cloudStatus = cloudVm.status()
-                            cloudConflict = false
-                            message = "Este aparelho foi enviado para a nuvem como a versão atual."
-                        }
-                        .onFailure { message = it.message ?: "Falha ao enviar este save para a nuvem." }
-                    busy = false
-                }
-            },
-            onForceRestore = {
-                val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
-                if (user == null) message = "Entre com Google antes de continuar."
-                else scope.launch {
-                    busy = true
-                    runCatching { cloudVm.forceRestore(user) }
-                        .onSuccess { result ->
-                            linkState = AccountLinkStore.adoptCloudSave(context, user, result.saveId)
-                            runCatching { AccountLinkStore.retryCloudRegistry(context, user) }
-                            cloudStatus = cloudVm.status()
-                            cloudConflict = false
-                            message = result.message
-                        }
-                        .onFailure { message = it.message ?: "Falha ao restaurar o backup." }
-                    busy = false
+                if (user == null) {
+                    message = "Entre com Google antes de sincronizar."
+                } else {
+                    scope.launch {
+                        busy = true
+                        val ok = AccountLinkStore.retryCloudRegistry(context, user)
+                        message = if (ok) "Registro da conta sincronizado no Firestore." else "Ainda não foi possível registrar no Firestore. Confira/publice as regras da V4."
+                        busy = false
+                    }
                 }
             },
             onSignOut = {
-                val user = authUser?.takeIf { GoogleAuthBridge.isGoogleUser(it) }
-                scope.launch {
-                    if (user != null && linkState.isLinkedTo(user)) runCatching { syncCloud(user, visibleMessage = false) }
-                    GoogleAuthBridge.signOut()
-                    authUser = null
-                    message = "Google desconectado. O save local continua neste aparelho e o último backup permanece na nuvem."
-                }
+                GoogleAuthBridge.signOut()
+                authUser = null
+                message = "Google desconectado. Seu save local continua intacto e vinculado à conta anterior."
             },
         )
     }
@@ -271,8 +174,8 @@ private fun StartupAccountDialog(
                 Text("Usinagem Master", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (user == null) "Conecte sua conta Google para manter a fábrica protegida na nuvem. Em outro celular, a mesma conta recupera o progresso salvo."
-                    else "Sua conta Google foi encontrada. Se existir um backup desta conta, o jogo recupera a mesma fábrica automaticamente.",
+                    if (user == null) "Conecte uma conta Google real. Se o jogo já criou uma UID temporária, ela será vinculada ao Google sem apagar seu progresso."
+                    else "Sua conta Google foi encontrada. Vincule a empresa que já existe neste aparelho.",
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodyLarge,
                 )
@@ -300,7 +203,7 @@ private fun StartupAccountDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "O primeiro vínculo envia seu save atual. Em um aparelho novo, um backup existente é restaurado antes de continuar.",
+                    "O vínculo NÃO cria uma empresa nova e NÃO apaga seu save atual.",
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                 )
@@ -315,16 +218,12 @@ private fun StartupAccountDialog(
 private fun ProfileAccountDialog(
     user: FirebaseUser?,
     linkState: AccountLinkState,
-    cloudStatus: CloudSaveStatus,
-    cloudConflict: Boolean,
     busy: Boolean,
     message: String?,
     onDismiss: () -> Unit,
     onGoogle: () -> Unit,
     onLink: () -> Unit,
-    onSyncSave: () -> Unit,
-    onForceUpload: () -> Unit,
-    onForceRestore: () -> Unit,
+    onRetryCloud: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -362,33 +261,9 @@ private fun ProfileAccountDialog(
                                 Text("Progresso do jogo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text("ID local: …" + linkState.localSaveId.takeLast(8))
                                 if (linkState.isLinkedTo(user)) {
-                                    Text("✓ Save protegido pela conta Google", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    Text("Dinheiro, nível, máquinas, funcionários, contratos, histórico financeiro, personagem, skins, roleta, skills, metas e progresso do dono entram no backup privado.")
-                                    if (cloudStatus.revision > 0L) {
-                                        Text(
-                                            "Backup v${cloudStatus.revision} • ${cloudSyncTime(cloudStatus.syncedAt)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    } else {
-                                        Text("O primeiro backup será criado na próxima sincronização.", style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    Button(onClick = onSyncSave, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                                        Text("☁ Sincronizar save agora")
-                                    }
-                                    if (cloudConflict) {
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.errorContainer,
-                                            shape = RoundedCornerShape(12.dp),
-                                        ) {
-                                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Text("Conflito de progresso", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onErrorContainer)
-                                                Text("A nuvem e este aparelho avançaram separadamente. Escolha qual versão deve prevalecer; nada foi sobrescrito automaticamente.")
-                                                Button(onClick = onForceRestore, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Usar versão da nuvem") }
-                                                OutlinedButton(onClick = onForceUpload, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Usar versão deste aparelho") }
-                                            }
-                                        }
-                                    }
+                                    Text("✓ Este save está vinculado a esta conta Google", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                    Text("Seu banco Room não foi recriado: dinheiro, nível, máquinas, contratos, skins e gacha permanecem no save atual.")
+                                    OutlinedButton(onClick = onRetryCloud, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Sincronizar registro da conta") }
                                 } else if (linkState.isLinked) {
                                     Text("⚠ Este save foi vinculado anteriormente a outra conta Google.", color = MaterialTheme.colorScheme.error)
                                 } else {
@@ -411,22 +286,16 @@ private fun ProfileAccountDialog(
                     ElevatedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Como funciona", fontWeight = FontWeight.Bold)
-                            Text("• O UID da conta Google identifica seu save privado no Firebase.")
-                            Text("• No primeiro aparelho, o progresso atual é enviado para a nuvem.")
-                            Text("• Em outro celular, a mesma conta restaura a fábrica e adota o mesmo slot de save.")
-                            Text("• O jogo verifica alterações durante a sessão e tenta salvar novamente ao ir para segundo plano.")
-                            Text("• Se dois aparelhos avançarem ao mesmo tempo, o jogo não sobrescreve silenciosamente: ele pede qual versão usar.")
+                            Text("• A empresa existente continua sendo a mesma.")
+                            Text("• Entrar com Google não cria um save vazio por cima dela.")
+                            Text("• O vínculo usa o UID do Firebase como identidade da conta.")
+                            Text("• A V4 também tenta registrar localSaveId em player_accounts no Firestore.")
                         }
                     }
                 }
             }
         }
     }
-}
-
-private fun cloudSyncTime(value: Long): String {
-    if (value <= 0L) return "ainda não sincronizado"
-    return SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR")).format(Date(value))
 }
 
 @Composable

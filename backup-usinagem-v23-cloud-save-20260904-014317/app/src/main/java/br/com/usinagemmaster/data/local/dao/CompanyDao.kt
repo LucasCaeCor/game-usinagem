@@ -11,5 +11,4 @@ interface CompanyDao {
     @Query("SELECT * FROM company WHERE id = 1 LIMIT 1") fun observe(): Flow<CompanyEntity?>
     @Query("SELECT * FROM company WHERE id = 1 LIMIT 1") suspend fun get(): CompanyEntity?
     @Upsert suspend fun upsert(value: CompanyEntity)
-    @Query("DELETE FROM company") suspend fun deleteAll()
 }

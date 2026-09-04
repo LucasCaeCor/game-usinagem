@@ -10,8 +10,6 @@ interface MachineDao {
     @Query("SELECT * FROM machines") suspend fun getAll(): List<MachineEntity>
     @Query("SELECT COUNT(*) FROM machines WHERE installed = 1") fun observeCount(): Flow<Int>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insert(value: MachineEntity)
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(values: List<MachineEntity>)
-    @Query("DELETE FROM machines") suspend fun deleteAll()
     @Update suspend fun update(value: MachineEntity)
     @Delete suspend fun delete(value: MachineEntity)
 }

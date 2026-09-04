@@ -52,69 +52,6 @@ class ExpansionRepository @Inject constructor(
 
     suspend fun snapshot(): ExpansionState = state.first()
 
-    suspend fun exportCloudState(): Map<String, Any?> {
-        val s = snapshot()
-        return mapOf(
-            "specialty" to s.specialty,
-            "companySkills" to s.companySkills.sorted(),
-            "playerSkills" to s.playerSkills.sorted(),
-            "gachaTickets" to s.gachaTickets,
-            "pityEpic" to s.pityEpic,
-            "pityLegendary" to s.pityLegendary,
-            "playerXp" to s.playerXp,
-            "claimedRentalXpIds" to s.claimedRentalXpIds.sorted(),
-            "ownedSkins" to s.ownedSkins.sorted(),
-            "equippedSkin" to s.equippedSkin,
-            "ownedCharacters" to s.ownedCharacters.sorted(),
-            "equippedCharacter" to s.equippedCharacter,
-            "tools" to s.tools.toSortedMap(),
-            "contractTools" to s.contractTools.toSortedMap(),
-            "premiumMachines" to s.premiumMachines.sorted(),
-            "lastDailyTicketDay" to s.lastDailyTicketDay,
-            "remoteHireOwnerUid" to s.remoteHireOwnerUid,
-            "remoteHireName" to s.remoteHireName,
-            "remoteHireBoostPct" to s.remoteHireBoostPct,
-            "remoteHireEndsAt" to s.remoteHireEndsAt,
-        )
-    }
-
-    suspend fun importCloudState(data: Map<String, Any?>) {
-        fun n(key: String): Number? = data[key] as? Number
-        fun strings(key: String): Set<String> = (data[key] as? List<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
-        fun intMap(key: String): Map<String, Int> = (data[key] as? Map<*, *>)?.entries?.mapNotNull { (k, v) ->
-            (k as? String)?.let { name -> (v as? Number)?.toInt()?.let { name to it } }
-        }?.toMap() ?: emptyMap()
-        fun stringMap(key: String): Map<String, String> = (data[key] as? Map<*, *>)?.entries?.mapNotNull { (k, v) ->
-            if (k is String && v is String) k to v else null
-        }?.toMap() ?: emptyMap()
-
-        context.expansionDataStore.edit { prefs ->
-            prefs[Keys.specialty] = data["specialty"] as? String ?: CompanySpecialty.GENERALIST.code
-            prefs[Keys.companySkills] = strings("companySkills")
-            prefs[Keys.playerSkills] = strings("playerSkills")
-            prefs[Keys.tickets] = (n("gachaTickets")?.toInt() ?: 5).coerceAtLeast(0)
-            prefs[Keys.pityEpic] = (n("pityEpic")?.toInt() ?: 0).coerceAtLeast(0)
-            prefs[Keys.pityLegendary] = (n("pityLegendary")?.toInt() ?: 0).coerceAtLeast(0)
-            prefs[Keys.playerXp] = (n("playerXp")?.toLong() ?: 0L).coerceAtLeast(0L)
-            prefs[Keys.claimedRentalXpIds] = strings("claimedRentalXpIds")
-            prefs[Keys.ownedSkins] = strings("ownedSkins") + "operador_padrao"
-            prefs[Keys.equippedSkin] = data["equippedSkin"] as? String ?: "operador_padrao"
-            prefs[Keys.ownedCharacters] = strings("ownedCharacters")
-            val equippedCharacter = data["equippedCharacter"] as? String
-            if (equippedCharacter.isNullOrBlank()) prefs.remove(Keys.equippedCharacter) else prefs[Keys.equippedCharacter] = equippedCharacter
-            prefs[Keys.tools] = encodeCounts(intMap("tools"))
-            prefs[Keys.contractTools] = encodeBindings(stringMap("contractTools"))
-            prefs[Keys.premiumMachines] = strings("premiumMachines")
-            prefs[Keys.lastDailyTicketDay] = n("lastDailyTicketDay")?.toLong() ?: -1L
-            val remoteOwner = data["remoteHireOwnerUid"] as? String
-            val remoteName = data["remoteHireName"] as? String
-            if (remoteOwner.isNullOrBlank()) prefs.remove(Keys.remoteOwnerUid) else prefs[Keys.remoteOwnerUid] = remoteOwner
-            if (remoteName.isNullOrBlank()) prefs.remove(Keys.remoteName) else prefs[Keys.remoteName] = remoteName
-            prefs[Keys.remoteBoost] = (n("remoteHireBoostPct")?.toInt() ?: 0).coerceIn(0, 25)
-            prefs[Keys.remoteEndsAt] = (n("remoteHireEndsAt")?.toLong() ?: 0L).coerceAtLeast(0L)
-        }
-    }
-
     suspend fun chooseSpecialty(code: String, companyLevel: Int) {
         val definition = CompanySpecialty.entries.firstOrNull { it.code == code } ?: error("Especialidade inválida")
         require(companyLevel >= definition.minLevel) { "Essa especialidade libera no nível ${definition.minLevel}" }

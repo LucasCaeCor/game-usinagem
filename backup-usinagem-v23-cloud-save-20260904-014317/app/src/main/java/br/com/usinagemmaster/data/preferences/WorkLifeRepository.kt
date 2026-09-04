@@ -180,27 +180,6 @@ class WorkLifeRepository @Inject constructor(
         }
     }
 
-    suspend fun exportCloudState(): Map<String, Any?> {
-        val prefs = context.workLifeDataStore.data.first()
-        return mapOf(
-            "mode" to (prefs[Keys.mode] ?: FactoryScheduleMode.SHIFT_12H.code),
-            "fatigue" to prefs[Keys.fatigue].orEmpty(),
-            "preciseFatigue" to prefs[Keys.preciseFatigue].orEmpty(),
-            "resting" to prefs[Keys.resting].orEmpty(),
-            "autoRest" to (prefs[Keys.autoRest] ?: true),
-        )
-    }
-
-    suspend fun importCloudState(data: Map<String, Any?>) {
-        context.workLifeDataStore.edit { prefs ->
-            prefs[Keys.mode] = data["mode"] as? String ?: FactoryScheduleMode.SHIFT_12H.code
-            prefs[Keys.fatigue] = data["fatigue"] as? String ?: ""
-            prefs[Keys.preciseFatigue] = data["preciseFatigue"] as? String ?: ""
-            prefs[Keys.resting] = data["resting"] as? String ?: ""
-            prefs[Keys.autoRest] = data["autoRest"] as? Boolean ?: true
-        }
-    }
-
     private fun decode(prefs: Preferences): WorkLifeState = WorkLifeState(
         modeCode = prefs[Keys.mode] ?: FactoryScheduleMode.SHIFT_12H.code,
         fatigue = parseIntMap(prefs[Keys.fatigue]),

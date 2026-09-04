@@ -17,12 +17,6 @@ service cloud.firestore {
       allow list, delete: if false;
     }
 
-    // V23 • backup privado completo da conta Google.
-    // Qualquer documento abaixo do UID pertence exclusivamente ao próprio usuário.
-    match /cloud_saves/{uid}/{document=**} {
-      allow read, write: if isOwner(uid);
-    }
-
     // V5 • visita às fábricas da comunidade.
     match /public_factories/{uid} {
       allow read: if signedIn();

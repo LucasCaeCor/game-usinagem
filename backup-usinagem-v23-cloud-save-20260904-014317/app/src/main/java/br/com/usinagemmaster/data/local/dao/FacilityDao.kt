@@ -9,8 +9,5 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FacilityDao {
     @Query("SELECT * FROM facility_upgrades") fun observeAll(): Flow<List<FacilityUpgradeEntity>>
-    @Query("SELECT * FROM facility_upgrades") suspend fun getAll(): List<FacilityUpgradeEntity>
-    @Query("DELETE FROM facility_upgrades") suspend fun deleteAll()
     @Upsert suspend fun upsert(value: FacilityUpgradeEntity)
-    @Upsert suspend fun upsertAll(values: List<FacilityUpgradeEntity>)
 }

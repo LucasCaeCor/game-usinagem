@@ -10,8 +10,6 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees ORDER BY skillLevel DESC") suspend fun getAll(): List<EmployeeEntity>
     @Query("SELECT COUNT(*) FROM employees") fun observeCount(): Flow<Int>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insert(value: EmployeeEntity)
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(values: List<EmployeeEntity>)
-    @Query("DELETE FROM employees") suspend fun deleteAll()
     @Update suspend fun update(value: EmployeeEntity)
     @Delete suspend fun delete(value: EmployeeEntity)
 }

@@ -21,12 +21,6 @@ interface LegendaryMissionDao {
     @Upsert
     suspend fun upsert(mission: LegendaryMissionEntity)
 
-    @Upsert
-    suspend fun upsertAll(missions: List<LegendaryMissionEntity>)
-
-    @Query("DELETE FROM legendary_missions")
-    suspend fun deleteAll()
-
     @Update
     suspend fun update(mission: LegendaryMissionEntity)
 }

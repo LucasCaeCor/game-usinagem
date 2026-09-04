@@ -32,54 +32,6 @@ class ActiveGameplayRepository @Inject constructor(@ApplicationContext private v
     val state: Flow<CareerState> = context.activeGameplayDataStore.data.map(::decode)
     suspend fun snapshot() = state.first()
 
-    suspend fun exportCloudState(): Map<String, Any?> {
-        val p = context.activeGameplayDataStore.data.first()
-        return mapOf(
-            "activeBatch" to p[K.batch],
-            "masteryXp" to (p[K.mastery] ?: emptySet()).sorted(),
-            "industrialSkills" to (p[K.skills] ?: emptySet()).sorted(),
-            "milestones" to (p[K.milestones] ?: emptySet()).sorted(),
-            "achievements" to (p[K.achievements] ?: emptySet()).sorted(),
-            "manualOps" to (p[K.manual] ?: 0),
-            "assistedOps" to (p[K.assisted] ?: 0),
-            "perfectOps" to (p[K.perfect] ?: 0),
-            "approvedBatches" to (p[K.approved] ?: 0),
-            "shippedBatches" to (p[K.shipped] ?: 0),
-            "reworkedBatches" to (p[K.reworked] ?: 0),
-            "scrappedBatches" to (p[K.scrapped] ?: 0),
-            "bestScore" to (p[K.best] ?: 0),
-            "streak" to (p[K.streak] ?: 0),
-            "skillPoints" to (p[K.points] ?: 1),
-            "productionPolicy" to (p[K.policy] ?: ProductionPolicy.BALANCED.name),
-            "lastOperationAt" to (p[K.last] ?: 0L),
-        )
-    }
-
-    suspend fun importCloudState(data: Map<String, Any?>) {
-        fun n(key: String): Number? = data[key] as? Number
-        fun strings(key: String): Set<String> = (data[key] as? List<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
-        context.activeGameplayDataStore.edit { p ->
-            val batch = data["activeBatch"] as? String
-            if (batch.isNullOrBlank()) p.remove(K.batch) else p[K.batch] = batch
-            p[K.mastery] = strings("masteryXp")
-            p[K.skills] = strings("industrialSkills")
-            p[K.milestones] = strings("milestones")
-            p[K.achievements] = strings("achievements")
-            p[K.manual] = n("manualOps")?.toInt() ?: 0
-            p[K.assisted] = n("assistedOps")?.toInt() ?: 0
-            p[K.perfect] = n("perfectOps")?.toInt() ?: 0
-            p[K.approved] = n("approvedBatches")?.toInt() ?: 0
-            p[K.shipped] = n("shippedBatches")?.toInt() ?: 0
-            p[K.reworked] = n("reworkedBatches")?.toInt() ?: 0
-            p[K.scrapped] = n("scrappedBatches")?.toInt() ?: 0
-            p[K.best] = n("bestScore")?.toInt() ?: 0
-            p[K.streak] = n("streak")?.toInt() ?: 0
-            p[K.points] = (n("skillPoints")?.toInt() ?: 1).coerceAtLeast(0)
-            p[K.policy] = data["productionPolicy"] as? String ?: ProductionPolicy.BALANCED.name
-            p[K.last] = n("lastOperationAt")?.toLong() ?: 0L
-        }
-    }
-
     suspend fun recordMachining(machineId:String,machineType:String,contractId:String,result:MinigameResult,manual:Boolean):OwnerWorkBatch {
         var out:OwnerWorkBatch?=null
         context.activeGameplayDataStore.edit { p ->

@@ -11,8 +11,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface GoalDao {
     @Query("SELECT * FROM goals") fun observeAll(): Flow<List<GoalEntity>>
-    @Query("SELECT * FROM goals") suspend fun getAll(): List<GoalEntity>
-    @Query("DELETE FROM goals") suspend fun deleteAll()
     @Query("SELECT COUNT(*) FROM goals") suspend fun count(): Int
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(values: List<GoalEntity>)
     @Update suspend fun update(value: GoalEntity)

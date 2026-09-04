@@ -10,7 +10,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import br.com.usinagemmaster.domain.simulation.EconomyBalance
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.util.Calendar
 import javax.inject.Inject
@@ -119,44 +118,6 @@ class GamePreferences @Inject constructor(@ApplicationContext private val contex
     suspend fun setVibration(value: Boolean) = context.dataStore.edit { it[Keys.VIBRATION] = value }
     suspend fun setNpcSpeech(value: Boolean) = context.dataStore.edit { it[Keys.NPC_SPEECH] = value }
     suspend fun setSpeechDuration(seconds: Int) = context.dataStore.edit { it[Keys.SPEECH_DURATION] = seconds.coerceIn(5, 12) }
-
-    /** Snapshot privado usado pelo backup da conta Google. */
-    suspend fun exportCloudState(): Map<String, Any?> {
-        val prefs = context.dataStore.data.first()
-        return mapOf(
-            "sound" to (prefs[Keys.SOUND] ?: true),
-            "vibration" to (prefs[Keys.VIBRATION] ?: true),
-            "npcSpeech" to (prefs[Keys.NPC_SPEECH] ?: true),
-            "speechDurationSeconds" to (prefs[Keys.SPEECH_DURATION] ?: 8),
-            "boostTokens" to (prefs[Keys.BOOST_TOKENS] ?: EconomyBalance.STARTING_BOOST_TOKENS),
-            "lastDailyRewardDay" to (prefs[Keys.LAST_DAILY_REWARD_DAY] ?: 0),
-            "lastMinigameAt" to (prefs[Keys.LAST_MINIGAME_AT] ?: 0L),
-            "idleEmployeeId" to prefs[Keys.IDLE_EMPLOYEE_ID],
-            "idleSinceAt" to (prefs[Keys.IDLE_SINCE_AT] ?: 0L),
-            "idleUntilAt" to (prefs[Keys.IDLE_UNTIL_AT] ?: 0L),
-            "nextIdleCheckAt" to (prefs[Keys.NEXT_IDLE_CHECK_AT] ?: 0L),
-            "snackImmunityUntil" to (prefs[Keys.SNACK_IMMUNITY_UNTIL] ?: 0L),
-        )
-    }
-
-    suspend fun importCloudState(data: Map<String, Any?>) {
-        fun n(key: String): Number? = data[key] as? Number
-        context.dataStore.edit { prefs ->
-            prefs[Keys.SOUND] = data["sound"] as? Boolean ?: true
-            prefs[Keys.VIBRATION] = data["vibration"] as? Boolean ?: true
-            prefs[Keys.NPC_SPEECH] = data["npcSpeech"] as? Boolean ?: true
-            prefs[Keys.SPEECH_DURATION] = (n("speechDurationSeconds")?.toInt() ?: 8).coerceIn(5, 12)
-            prefs[Keys.BOOST_TOKENS] = (n("boostTokens")?.toInt() ?: EconomyBalance.STARTING_BOOST_TOKENS).coerceAtLeast(0)
-            prefs[Keys.LAST_DAILY_REWARD_DAY] = n("lastDailyRewardDay")?.toInt() ?: 0
-            prefs[Keys.LAST_MINIGAME_AT] = n("lastMinigameAt")?.toLong() ?: 0L
-            val idle = data["idleEmployeeId"] as? String
-            if (idle.isNullOrBlank()) prefs.remove(Keys.IDLE_EMPLOYEE_ID) else prefs[Keys.IDLE_EMPLOYEE_ID] = idle
-            prefs[Keys.IDLE_SINCE_AT] = n("idleSinceAt")?.toLong() ?: 0L
-            prefs[Keys.IDLE_UNTIL_AT] = n("idleUntilAt")?.toLong() ?: 0L
-            prefs[Keys.NEXT_IDLE_CHECK_AT] = n("nextIdleCheckAt")?.toLong() ?: 0L
-            prefs[Keys.SNACK_IMMUNITY_UNTIL] = n("snackImmunityUntil")?.toLong() ?: 0L
-        }
-    }
 
     suspend fun claimDailyReward(): Boolean {
         var claimed = false

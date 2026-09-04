@@ -7,8 +7,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ContractDao {
-    @Query("SELECT * FROM contracts ORDER BY generatedAt DESC") suspend fun getAll(): List<ContractEntity>
-    @Query("DELETE FROM contracts") suspend fun deleteAll()
     @Query("SELECT * FROM contracts WHERE status != 'COMPLETED' ORDER BY generatedAt DESC") fun observeAll(): Flow<List<ContractEntity>>
     @Query("SELECT * FROM contracts WHERE status = 'ACTIVE' ORDER BY startedAt ASC") suspend fun getActive(): List<ContractEntity>
     @Query("SELECT * FROM contracts WHERE status = 'COMPLETED' ORDER BY generatedAt DESC") suspend fun getCompleted(): List<ContractEntity>

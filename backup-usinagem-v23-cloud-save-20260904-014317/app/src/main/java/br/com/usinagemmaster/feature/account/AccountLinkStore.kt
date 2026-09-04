@@ -81,7 +81,6 @@ object AccountLinkStore {
                         "displayName" to user.displayName,
                         "localSaveId" to after.localSaveId,
                         "provider" to "google",
-                        "cloudSaveEnabled" to true,
                         "lastLinkedAt" to FieldValue.serverTimestamp(),
                         "clientLinkedAtMs" to now,
                     ),
@@ -91,20 +90,6 @@ object AccountLinkStore {
         }.isSuccess
 
         return AccountLinkResult(after, cloudOk)
-    }
-
-    /** Adota o mesmo slot de save ao restaurar a conta em outro aparelho. */
-    fun adoptCloudSave(context: Context, user: FirebaseUser, cloudSaveId: String): AccountLinkState {
-        require(cloudSaveId.isNotBlank()) { "ID do save na nuvem inválido." }
-        val now = System.currentTimeMillis()
-        prefs(context).edit()
-            .putString(KEY_LOCAL_SAVE_ID, cloudSaveId)
-            .putString(KEY_UID, user.uid)
-            .putString(KEY_EMAIL, user.email)
-            .putString(KEY_NAME, user.displayName)
-            .putLong(KEY_LINKED_AT, now)
-            .apply()
-        return state(context)
     }
 
     suspend fun retryCloudRegistry(context: Context, user: FirebaseUser): Boolean {
@@ -119,7 +104,6 @@ object AccountLinkStore {
                         "displayName" to user.displayName,
                         "localSaveId" to s.localSaveId,
                         "provider" to "google",
-                        "cloudSaveEnabled" to true,
                         "lastLinkedAt" to FieldValue.serverTimestamp(),
                     ),
                     SetOptions.merge(),

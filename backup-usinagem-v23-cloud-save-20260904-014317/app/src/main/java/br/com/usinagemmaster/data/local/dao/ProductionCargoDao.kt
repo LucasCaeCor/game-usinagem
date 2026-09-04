@@ -15,15 +15,6 @@ abstract class ProductionCargoDao {
     @Query("SELECT * FROM production_cargo WHERE deliveredAt IS NULL ORDER BY createdAt, id")
     abstract fun observePending(): Flow<List<ProductionCargoEntity>>
 
-    @Query("SELECT * FROM production_cargo ORDER BY createdAt, id")
-    abstract suspend fun getAll(): List<ProductionCargoEntity>
-
-    @Query("DELETE FROM production_cargo")
-    abstract suspend fun deleteAll()
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    abstract suspend fun insertAll(values: List<ProductionCargoEntity>)
-
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insert(cargo: ProductionCargoEntity)
 

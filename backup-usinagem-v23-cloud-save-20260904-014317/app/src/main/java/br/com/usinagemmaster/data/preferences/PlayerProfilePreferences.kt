@@ -9,7 +9,6 @@ import br.com.usinagemmaster.domain.social.LocalPlayerProfile
 import br.com.usinagemmaster.domain.social.PlayerAvatar
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,43 +48,6 @@ class PlayerProfilePreferences @Inject constructor(
                 accessory = prefs[Keys.ACCESSORY] ?: "NONE"
             ),
             onboardingComplete = prefs[Keys.COMPLETE] ?: false
-        )
-    }
-
-    suspend fun exportCloudState(): Map<String, Any?> {
-        val value = profile.first()
-        return mapOf(
-            "displayName" to value.displayName,
-            "gender" to value.avatar.gender,
-            "skinStyle" to value.avatar.skinStyle,
-            "bodyType" to value.avatar.bodyType,
-            "skinTone" to value.avatar.skinTone,
-            "hairStyle" to value.avatar.hairStyle,
-            "hairColor" to value.avatar.hairColor,
-            "uniformColor" to value.avatar.uniformColor,
-            "helmetColor" to value.avatar.helmetColor,
-            "accessory" to value.avatar.accessory,
-            "onboardingComplete" to value.onboardingComplete,
-        )
-    }
-
-    suspend fun importCloudState(data: Map<String, Any?>) {
-        save(
-            LocalPlayerProfile(
-                displayName = (data["displayName"] as? String).orEmpty(),
-                avatar = PlayerAvatar(
-                    gender = data["gender"] as? String ?: "MALE",
-                    skinStyle = data["skinStyle"] as? String ?: "WORKSHOP",
-                    bodyType = data["bodyType"] as? String ?: "STANDARD",
-                    skinTone = data["skinTone"] as? String ?: "MEDIUM",
-                    hairStyle = data["hairStyle"] as? String ?: "SHORT",
-                    hairColor = data["hairColor"] as? String ?: "DARK",
-                    uniformColor = data["uniformColor"] as? String ?: "NAVY",
-                    helmetColor = data["helmetColor"] as? String ?: "YELLOW",
-                    accessory = data["accessory"] as? String ?: "NONE",
-                ),
-                onboardingComplete = data["onboardingComplete"] as? Boolean ?: false,
-            )
         )
     }
 
