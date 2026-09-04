@@ -2,9 +2,8 @@ package br.com.usinagemmaster.feature.machines
 import br.com.usinagemmaster.domain.expansion.ExpansionCatalog
 import br.com.usinagemmaster.data.repository.PremiumMachineInstaller
 
-import br.com.usinagemmaster.feature.expansion.ExpansionLauncherCard
-
 import br.com.usinagemmaster.feature.expansion.ExpansionHubDialog
+import br.com.usinagemmaster.feature.expansion.FactoryCornerShortcutDock
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -76,10 +75,14 @@ fun MachinesScreen(
     val ownerMessage by activeGameplayVm.message.collectAsStateWithLifecycle()
 
     // EXPANSION_HUB_INJECTED
-    val expansionHubVisible = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var expansionHubSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
 
-    if (expansionHubVisible.value) {
-        ExpansionHubDialog(onDismiss = { expansionHubVisible.value = false })
+    expansionHubSection?.let { section ->
+        ExpansionHubDialog(
+            onDismiss = { expansionHubSection = null },
+            initialSection = section,
+            showSectionNavigation = true,
+        )
     }
     val machines by vm.machines.collectAsStateWithLifecycle()
     val employees by vm.employees.collectAsStateWithLifecycle()
@@ -188,8 +191,6 @@ fun MachinesScreen(
                 item { CareerJourneyCard(dashboard, machines, employees, career) }
                 item {
                     WarehouseTabs(mode = mode, onMode = { mode = it })
-                // EXPANSION_LAUNCHER_V2
-                ExpansionLauncherCard(onOpen = { expansionHubVisible.value = true })
                 }
                 // V15_3_WORKLIFE_FACTORY_CARD
                 item {
@@ -247,34 +248,42 @@ fun MachinesScreen(
                     }
                 } else {
                     item {
-                        FactoryLiveSceneStudio(
-                            machines = machines.filter { it.installed },
-                            employees = employees,
-                            factoryFrame = factoryFrame,
-                            pendingCargo = pendingCargo,
-                            delivering = delivering,
-                            onDeliver = vm::deliverCargo,
-                            production = if (v15WorkLife.factoryOpen()) production.machineProduction else emptyList(),
-                            soundEnabled = settings.sound,
-                            speechEnabled = settings.npcSpeech,
-                            speechDurationSeconds = settings.speechDurationSeconds,
-                            playerProfile = playerProfile,
-                            selectedMachineId = selectedId,
-                            ownerWorkBatch = career.activeBatch,
-                            onOwnerStation = { station ->
-                                when (station) {
-                                    OwnerStation.QUALITY -> when (career.activeBatch?.stage) { ProductionStage.MACHINED -> activeGameplayVm.moveToQuality(); ProductionStage.WAITING_QC, ProductionStage.QC -> showOwnerQuality = true; else -> Unit }
-                                    OwnerStation.PACKING -> if (career.activeBatch?.stage == ProductionStage.APPROVED) activeGameplayVm.pack()
-                                    OwnerStation.SHIPPING -> if (career.activeBatch?.stage == ProductionStage.READY_TO_SHIP) activeGameplayVm.ship()
-                                    else -> Unit
+                        Box(Modifier.fillMaxWidth()) {
+                            FactoryLiveSceneStudio(
+                                machines = machines.filter { it.installed },
+                                employees = employees,
+                                factoryFrame = factoryFrame,
+                                pendingCargo = pendingCargo,
+                                delivering = delivering,
+                                onDeliver = vm::deliverCargo,
+                                production = if (v15WorkLife.factoryOpen()) production.machineProduction else emptyList(),
+                                soundEnabled = settings.sound,
+                                speechEnabled = settings.npcSpeech,
+                                speechDurationSeconds = settings.speechDurationSeconds,
+                                playerProfile = playerProfile,
+                                selectedMachineId = selectedId,
+                                ownerWorkBatch = career.activeBatch,
+                                onOwnerStation = { station ->
+                                    when (station) {
+                                        OwnerStation.QUALITY -> when (career.activeBatch?.stage) { ProductionStage.MACHINED -> activeGameplayVm.moveToQuality(); ProductionStage.WAITING_QC, ProductionStage.QC -> showOwnerQuality = true; else -> Unit }
+                                        OwnerStation.PACKING -> if (career.activeBatch?.stage == ProductionStage.APPROVED) activeGameplayVm.pack()
+                                        OwnerStation.SHIPPING -> if (career.activeBatch?.stage == ProductionStage.READY_TO_SHIP) activeGameplayVm.ship()
+                                        else -> Unit
+                                    }
+                                },
+                                onReprimand = vm::reprimand,
+                                onSelect = { machine ->
+                                    selectedId = machine.id
+                                    manageId = machine.id
                                 }
-                            },
-                            onReprimand = vm::reprimand,
-                            onSelect = { machine ->
-                                selectedId = machine.id
-                                manageId = machine.id
-                            }
-                        )
+                            )
+                            FactoryCornerShortcutDock(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 12.dp, end = 12.dp),
+                                onOpenSection = { expansionHubSection = it }
+                            )
+                        }
                     }
                     focusedMachine?.let { machine ->
                         item {

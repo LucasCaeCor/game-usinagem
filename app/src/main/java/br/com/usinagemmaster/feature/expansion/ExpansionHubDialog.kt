@@ -49,6 +49,19 @@ private enum class ExpansionTab(val label: String) {
 }
 
 private data class WheelSector(val type: String, val label: String, val symbol: String)
+private data class FactoryShortcutAction(
+    val section: String,
+    val icon: String,
+    val title: String,
+    val accent: Color,
+)
+
+private val factoryCornerShortcuts = listOf(
+    FactoryShortcutAction("gacha", "🎰", "Roleta", Color(0xFFFFB84D)),
+    FactoryShortcutAction("skills", "🔬", "Skills", Color(0xFF75D6FF)),
+    FactoryShortcutAction("company", "🏭", "Empresa", Color(0xFF74E39B)),
+    FactoryShortcutAction("character", "👷", "Equipe", Color(0xFFFF9BC2)),
+)
 
 // 12 setores aproximam visualmente as chances por CATEGORIA.
 // A raridade continua sendo decidida pelo algoritmo real/pity no ExpansionRepository.
@@ -823,6 +836,76 @@ private fun AccountTab(state: ExpansionUiState, vm: ExpansionViewModel) {
         item {
             Text("Diagnóstico", fontWeight = FontWeight.Bold)
             Text("Se o seletor de contas não abrir, confirme que app/google-services.json é o NOVO arquivo baixado depois de ativar Google e que ele contém oauth_client do tipo web.")
+        }
+    }
+}
+
+@Composable
+fun FactoryCornerShortcutDock(
+    modifier: Modifier = Modifier,
+    onOpenSection: (String) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        FilledTonalButton(
+            onClick = { expanded = !expanded },
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = Color(0xE6142026),
+                contentColor = Color.White,
+            ),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = .12f)),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
+        ) {
+            Text("☰", fontWeight = FontWeight.Black)
+            Spacer(Modifier.width(7.dp))
+            Text("ACESSOS", fontWeight = FontWeight.Black)
+            Spacer(Modifier.width(7.dp))
+            Text(if (expanded) "▴" else "▾", color = Color(0xFFAFC3CC))
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 190.dp),
+        ) {
+            factoryCornerShortcuts.forEach { action ->
+                DropdownMenuItem(
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(action.title, color = Color.White, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                when (action.section) {
+                                    "gacha" -> "Girar e ver recompensas"
+                                    "skills" -> "Evoluir especializações"
+                                    "company" -> "Expandir a fábrica"
+                                    else -> "Gerenciar personagens"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF9CB3BC),
+                            )
+                        }
+                    },
+                    leadingIcon = {
+                        Surface(
+                            modifier = Modifier.size(34.dp),
+                            shape = RoundedCornerShape(11.dp),
+                            color = action.accent.copy(alpha = .16f),
+                            border = BorderStroke(1.dp, action.accent.copy(alpha = .34f)),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(action.icon)
+                            }
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onOpenSection(action.section)
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }
